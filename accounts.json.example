@@ -1,0 +1,12 @@
+[
+  {
+    "containerCode": "84794164",
+    "containerName": "Account1-Twitter+Gmail+DC",
+    "platforms": ["twitter", "gmail", "discord"]
+  },
+  {
+    "containerCode": "84794165",
+    "containerName": "Account2-Twitter+DC",
+    "platforms": ["twitter", "discord"]
+  }
+]
