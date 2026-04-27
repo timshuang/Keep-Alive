@@ -5,3 +5,4 @@ logs/
 accounts.json
 state.json
 *.log
+HANDOVER.md
