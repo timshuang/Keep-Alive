@@ -98,10 +98,40 @@ const DEFAULTS: JsoncConfig = {
   },
 };
 
+function isWSL(): boolean {
+  try {
+    const version = fs.readFileSync('/proc/version', 'utf-8');
+    return version.toLowerCase().includes('microsoft');
+  } catch {
+    return false;
+  }
+}
+
+function getWSLHostIP(): string | null {
+  try {
+    const resolv = fs.readFileSync('/etc/resolv.conf', 'utf-8');
+    const match = resolv.match(/^nameserver\s+(\S+)/m);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveHubHost(host: string): string {
+  if (host === '127.0.0.1' && isWSL()) {
+    const wslIP = getWSLHostIP();
+    if (wslIP) {
+      console.log(`[WSL] Detected WSL environment, replacing hub host 127.0.0.1 → ${wslIP}`);
+      return wslIP;
+    }
+  }
+  return host;
+}
+
 export function loadConfig(): Config {
   const jsonc = loadJsoncConfig();
 
-  const hubHost = jsonc.hub?.host ?? DEFAULTS.hub!.host!;
+  const hubHost = resolveHubHost(jsonc.hub?.host ?? DEFAULTS.hub!.host!);
   const hubPort = jsonc.hub?.port ?? DEFAULTS.hub!.port!;
 
   const tgBotToken = getEnv('TG_BOT_TOKEN');
