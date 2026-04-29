@@ -1,10 +1,10 @@
 import TelegramBot from 'node-telegram-bot-api';
+import { Resend } from 'resend';
 import { Config } from './config';
 import { logger } from './logger';
 import { PlatformName } from './detector';
 import { ActionOutcome } from './actions';
 import { AppState, PlatformState } from './state';
-import nodemailer from 'nodemailer';
 
 interface AccountInfo {
   containerCode: string;
@@ -16,7 +16,7 @@ export class Notifier {
   private bot: TelegramBot;
   private chatId: string;
   private config: Config;
-  private emailTransporter: nodemailer.Transporter | null = null;
+  private resend: Resend | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -30,15 +30,7 @@ export class Notifier {
     this.chatId = config.telegram.chatId;
 
     if (config.email.configured) {
-      this.emailTransporter = nodemailer.createTransport({
-        host: config.email.smtpHost,
-        port: config.email.smtpPort,
-        secure: config.email.smtpPort === 465,
-        auth: {
-          user: config.email.smtpUser,
-          pass: config.email.smtpPass,
-        },
-      });
+      this.resend = new Resend(config.email.resendApiKey);
     }
 
     this.setupCommands();
@@ -49,12 +41,6 @@ export class Notifier {
       const [, code, platform] = match!;
       logger.info(`TG: /reset command received: ${code} ${platform}`);
       this.onReset?.(code, platform as PlatformName);
-    });
-
-    this.bot.onText(/\/set email\s+(\S+)/, async (msg, match) => {
-      const [, email] = match!;
-      logger.info(`TG: /set email command received: ${email}`);
-      this.onSetEmail?.(email);
     });
 
     this.bot.onText(/\/status/, async (msg) => {
@@ -70,9 +56,17 @@ export class Notifier {
   }
 
   onReset?: (code: string, platform: PlatformName) => void;
-  onSetEmail?: (email: string) => void;
   onStatus?: () => void;
   onReboot?: () => void;
+
+  async testConnection(): Promise<{ ok: boolean; botUsername?: string }> {
+    try {
+      const botInfo = await this.bot.getMe();
+      return { ok: true, botUsername: botInfo.username };
+    } catch {
+      return { ok: false };
+    }
+  }
 
   async send(text: string): Promise<void> {
     try {
@@ -163,29 +157,28 @@ export class Notifier {
       '<pre>',
       '/reset  &lt;containerCode&gt; &lt;platform&gt;  重置异常账号',
       '/status                   查看当前状态',
-      '/set email &lt;addr&gt;         设置告警邮箱',
       '/reboot                   重启程序',
       '</pre>',
       '',
       '<b>示例：</b>',
-      '<code>/reset 84794164 gmail</code>',
+      '<code>/reset 84794164 gmail</code>'
     ].join('\n');
 
     await this.send(msg);
   }
 
   async sendEmailWarning(): Promise<void> {
-    await this.send('⚠️ <b>未配置告警邮箱！</b>\n\n请发送 <code>/set email your@email.com</code>\n并在 .env 中配置 SMTP 信息。');
+    await this.send('⚠️ <b>未配置告警邮箱！</b>\n\n请在 .env 中配置 RESEND_API_KEY 和 ALERT_EMAIL 以启用邮件告警。\n也可通过 <code>/set email your@email.com</code> 设置收件地址。');
   }
 
   async sendDeathNoticeAndEmail(): Promise<void> {
     const msg = '💀 <b>Keepalive 程序异常退出！</b>\n\nWatchdog 正在重启程序...';
     await this.send(msg);
 
-    if (this.emailTransporter && this.config.email.alertEmail) {
+    if (this.resend && this.config.email.alertEmail) {
       try {
-        await this.emailTransporter.sendMail({
-          from: this.config.email.smtpFrom,
+        await this.resend.emails.send({
+          from: 'Keepalive <onboarding@resend.dev>',
           to: this.config.email.alertEmail,
           subject: '💀 Keepalive 程序异常退出',
           text: `Keepalive program died at ${new Date().toISOString()}. Watchdog is restarting...`,

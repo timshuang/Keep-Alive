@@ -141,29 +141,22 @@ async function main(): Promise<void> {
   const hub = new HubClient(config);
   const notifier = new Notifier(config);
 
+  logger.info('Testing Telegram connection...');
+  const tgResult = await notifier.testConnection();
+  if (tgResult.ok) {
+    logger.success(`✅ Telegram 连接成功 (bot: @${tgResult.botUsername})`);
+  } else {
+    if (config.telegram.apiProxy) {
+      logger.error(`❌ Telegram 连接失败（已配置代理 ${config.telegram.apiProxy}）。请检查代理地址是否正确、代理服务是否正常运行。`);
+    } else {
+      logger.error('❌ Telegram 连接失败（无法直连，请配置代理）。请在 .env 中配置 TG_API_PROXY 后重试。');
+    }
+    process.exit(1);
+  }
+
   notifier.onReset = (code: string, platform: PlatformName) => {
     updatePlatformState(state, code, platform, { status: 'ok', lastAlert: undefined, alertDetail: undefined });
     notifier.send(`✅ 已重置 ${code}/${platform} 状态为 ok`);
-  };
-
-  notifier.onSetEmail = (email: string) => {
-    logger.info(`Setting alert email to ${email}`);
-    try {
-      const envPath = path.resolve(process.cwd(), '.env');
-      let envContent = '';
-      if (fs.existsSync(envPath)) {
-        envContent = fs.readFileSync(envPath, 'utf-8');
-      }
-      if (envContent.includes('ALERT_EMAIL=')) {
-        envContent = envContent.replace(/ALERT_EMAIL=.*/g, `ALERT_EMAIL=${email}`);
-      } else {
-        envContent += `\nALERT_EMAIL=${email}`;
-      }
-      fs.writeFileSync(envPath, envContent, 'utf-8');
-      notifier.send(`✅ 告警邮箱已设置为 ${email}\n⚠️ 请确保 .env 中 SMTP 配置正确，重启后生效。`);
-    } catch (err) {
-      notifier.send(`❌ 设置邮箱失败: ${err}`);
-    }
   };
 
   notifier.onStatus = () => {
@@ -226,11 +219,6 @@ async function main(): Promise<void> {
     logger.error('Environment precheck failed. Stopping.');
     await notifier.send('❌ 环境预检失败，程序已停止。请检查失败环境后重新运行。');
     process.exit(1);
-  }
-
-  if (!config.email.configured) {
-    await notifier.sendEmailWarning();
-    logger.warnLine('未配置告警邮箱！请发送 /set email your@email.com');
   }
 
   await notifier.sendStartupGuide();

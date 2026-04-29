@@ -1,0 +1,37 @@
+{
+  // Hubstudio 指纹浏览器 API
+  "hub": {
+    "host": "127.0.0.1",   // Connector 地址
+    "port": 6873            // Connector 端口
+  },
+
+  // 保活间隔（天）
+  "intervals": {
+    "gmail": 3,             // Gmail 每 N 天保活一次
+    "twitter": 7,           // Twitter 每 N 天
+    "discord": 30           // Discord 每 N 天
+  },
+
+  // 抖动范围（天），实际 = interval ± jitter
+  "jitter": {
+    "gmail": 1,
+    "twitter": 2,
+    "discord": 5
+  },
+
+  // 调度参数
+  "scheduling": {
+    "accountIntervalMinSec": 180,   // 账号间最小间隔（秒）
+    "accountIntervalMaxSec": 480,   // 账号间最大间隔（秒）
+    "pageWaitMinSec": 3,            // 页面加载最小等待（秒）
+    "pageWaitMaxSec": 8,            // 页面加载最大等待（秒）
+    "randomStartDelayMaxMin": 720   // 随机启动延迟上限（分钟）
+  },
+
+  // 浏览行为时间范围（秒）
+  "browse": {
+    "twitterSecRange": [5, 15],     // Twitter 浏览总时长
+    "discordSecRange": [5, 10],     // Discord 浏览时长
+    "gmailReadSecRange": [5, 10]    // Gmail 单封邮件阅读时长
+  }
+}

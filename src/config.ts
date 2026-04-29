@@ -1,5 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import stripJsonComments from 'strip-json-comments';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -16,11 +18,7 @@ export interface Config {
   };
   email: {
     alertEmail: string;
-    smtpHost: string;
-    smtpPort: number;
-    smtpUser: string;
-    smtpPass: string;
-    smtpFrom: string;
+    resendApiKey: string;
     configured: boolean;
   };
   intervals: {
@@ -40,8 +38,28 @@ export interface Config {
     pageWaitMaxSec: number;
     randomStartDelayMaxMin: number;
   };
-  watchdog: {
-    checkIntervalHours: number;
+  browse: {
+    twitterSecRange: [number, number];
+    discordSecRange: [number, number];
+    gmailReadSecRange: [number, number];
+  };
+}
+
+interface JsoncConfig {
+  hub?: { host?: string; port?: number };
+  intervals?: { gmail?: number; twitter?: number; discord?: number };
+  jitter?: { gmail?: number; twitter?: number; discord?: number };
+  scheduling?: {
+    accountIntervalMinSec?: number;
+    accountIntervalMaxSec?: number;
+    pageWaitMinSec?: number;
+    pageWaitMaxSec?: number;
+    randomStartDelayMaxMin?: number;
+  };
+  browse?: {
+    twitterSecRange?: [number, number];
+    discordSecRange?: [number, number];
+    gmailReadSecRange?: [number, number];
   };
 }
 
@@ -53,33 +71,44 @@ function getEnv(key: string, defaultValue?: string): string {
   return value;
 }
 
-function getEnvInt(key: string, defaultValue?: number): number {
-  const raw = process.env[key];
-  if (raw === undefined || raw === '') {
-    if (defaultValue !== undefined) return defaultValue;
-    throw new Error(`Missing required env variable: ${key}`);
+function loadJsoncConfig(): JsoncConfig {
+  const configPath = path.resolve(process.cwd(), 'config.jsonc');
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(stripJsonComments(raw)) as JsoncConfig;
   }
-  const parsed = parseInt(raw, 10);
-  if (isNaN(parsed)) {
-    throw new Error(`Invalid integer for env variable ${key}: ${raw}`);
-  }
-  return parsed;
+  return {};
 }
 
+const DEFAULTS: JsoncConfig = {
+  hub: { host: '127.0.0.1', port: 6873 },
+  intervals: { gmail: 3, twitter: 7, discord: 30 },
+  jitter: { gmail: 1, twitter: 2, discord: 5 },
+  scheduling: {
+    accountIntervalMinSec: 180,
+    accountIntervalMaxSec: 480,
+    pageWaitMinSec: 3,
+    pageWaitMaxSec: 8,
+    randomStartDelayMaxMin: 720,
+  },
+  browse: {
+    twitterSecRange: [5, 15],
+    discordSecRange: [5, 10],
+    gmailReadSecRange: [5, 10],
+  },
+};
+
 export function loadConfig(): Config {
-  const hubHost = getEnv('HUB_API_HOST', '127.0.0.1');
-  const hubPort = getEnvInt('HUB_API_PORT', 6873);
+  const jsonc = loadJsoncConfig();
+
+  const hubHost = jsonc.hub?.host ?? DEFAULTS.hub!.host!;
+  const hubPort = jsonc.hub?.port ?? DEFAULTS.hub!.port!;
 
   const tgBotToken = getEnv('TG_BOT_TOKEN');
   const tgChatId = getEnv('TG_CHAT_ID');
-
+  const resendApiKey = getEnv('RESEND_API_KEY', '');
   const alertEmail = getEnv('ALERT_EMAIL', '');
-  const smtpHost = getEnv('SMTP_HOST', '');
-  const smtpUser = getEnv('SMTP_USER', '');
-  const smtpPass = getEnv('SMTP_PASS', '');
-  const smtpFrom = getEnv('SMTP_FROM', '');
-
-  const emailConfigured = !!(alertEmail && smtpHost && smtpUser && smtpPass && smtpFrom);
+  const emailConfigured = !!(resendApiKey && alertEmail);
 
   return {
     hub: {
@@ -94,32 +123,30 @@ export function loadConfig(): Config {
     },
     email: {
       alertEmail,
-      smtpHost,
-      smtpPort: getEnvInt('SMTP_PORT', 587),
-      smtpUser,
-      smtpPass,
-      smtpFrom,
+      resendApiKey,
       configured: emailConfigured,
     },
     intervals: {
-      gmail: getEnvInt('GMAIL_INTERVAL', 3),
-      twitter: getEnvInt('TWITTER_INTERVAL', 7),
-      discord: getEnvInt('DISCORD_INTERVAL', 30),
+      gmail: jsonc.intervals?.gmail ?? DEFAULTS.intervals!.gmail!,
+      twitter: jsonc.intervals?.twitter ?? DEFAULTS.intervals!.twitter!,
+      discord: jsonc.intervals?.discord ?? DEFAULTS.intervals!.discord!,
     },
     jitter: {
-      gmail: getEnvInt('GMAIL_JITTER', 1),
-      twitter: getEnvInt('TWITTER_JITTER', 2),
-      discord: getEnvInt('DISCORD_JITTER', 5),
+      gmail: jsonc.jitter?.gmail ?? DEFAULTS.jitter!.gmail!,
+      twitter: jsonc.jitter?.twitter ?? DEFAULTS.jitter!.twitter!,
+      discord: jsonc.jitter?.discord ?? DEFAULTS.jitter!.discord!,
     },
     scheduling: {
-      accountIntervalMinSec: getEnvInt('ACCOUNT_INTERVAL_MIN_SEC', 180),
-      accountIntervalMaxSec: getEnvInt('ACCOUNT_INTERVAL_MAX_SEC', 480),
-      pageWaitMinSec: getEnvInt('PAGE_WAIT_MIN_SEC', 3),
-      pageWaitMaxSec: getEnvInt('PAGE_WAIT_MAX_SEC', 8),
-      randomStartDelayMaxMin: getEnvInt('RANDOM_START_DELAY_MAX_MIN', 720),
+      accountIntervalMinSec: jsonc.scheduling?.accountIntervalMinSec ?? DEFAULTS.scheduling!.accountIntervalMinSec!,
+      accountIntervalMaxSec: jsonc.scheduling?.accountIntervalMaxSec ?? DEFAULTS.scheduling!.accountIntervalMaxSec!,
+      pageWaitMinSec: jsonc.scheduling?.pageWaitMinSec ?? DEFAULTS.scheduling!.pageWaitMinSec!,
+      pageWaitMaxSec: jsonc.scheduling?.pageWaitMaxSec ?? DEFAULTS.scheduling!.pageWaitMaxSec!,
+      randomStartDelayMaxMin: jsonc.scheduling?.randomStartDelayMaxMin ?? DEFAULTS.scheduling!.randomStartDelayMaxMin!,
     },
-    watchdog: {
-      checkIntervalHours: getEnvInt('WATCHDOG_CHECK_INTERVAL_HOURS', 6),
+    browse: {
+      twitterSecRange: jsonc.browse?.twitterSecRange ?? DEFAULTS.browse!.twitterSecRange!,
+      discordSecRange: jsonc.browse?.discordSecRange ?? DEFAULTS.browse!.discordSecRange!,
+      gmailReadSecRange: jsonc.browse?.gmailReadSecRange ?? DEFAULTS.browse!.gmailReadSecRange!,
     },
   };
 }
