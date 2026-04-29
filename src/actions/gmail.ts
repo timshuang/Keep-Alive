@@ -26,8 +26,8 @@ export interface ActionOutcome {
   name?: string;
 }
 
-async function browseTwitter(page: Page): Promise<void> {
-  const totalSec = randomBetween(5, 15);
+async function browseTwitter(page: Page, config: Config): Promise<void> {
+  const totalSec = randomBetween(config.browse.twitterSecRange[0], config.browse.twitterSecRange[1]);
   const scrollTimes = randomBetween(1, 2);
   const secPerScroll = Math.floor(totalSec / (scrollTimes + 1));
 
@@ -56,8 +56,8 @@ async function browseTwitter(page: Page): Promise<void> {
   logger.info(`Twitter: Browsed timeline for ~${totalSec}s`);
 }
 
-async function browseDiscord(page: Page): Promise<void> {
-  const browseSec = randomBetween(5, 10);
+async function browseDiscord(page: Page, config: Config): Promise<void> {
+  const browseSec = randomBetween(config.browse.discordSecRange[0], config.browse.discordSecRange[1]);
 
   try {
     const links = await page.$$('a[href*="/channels/"]');
@@ -79,7 +79,7 @@ async function browseDiscord(page: Page): Promise<void> {
   logger.info(`Discord: Browsed for ~${browseSec}s`);
 }
 
-async function browseGmail(page: Page): Promise<void> {
+async function browseGmail(page: Page, config: Config): Promise<void> {
   const emailCount = randomBetween(1, 2);
 
   try {
@@ -99,7 +99,7 @@ async function browseGmail(page: Page): Promise<void> {
     for (const row of selected) {
       try {
         await row.click({ timeout: 5000 });
-        const readSec = randomBetween(5, 10);
+        const readSec = randomBetween(config.browse.gmailReadSecRange[0], config.browse.gmailReadSecRange[1]);
         await waitSeconds(readSec);
         logger.info(`Gmail: Read an email for ~${readSec}s`);
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -131,7 +131,7 @@ export async function keepaliveGmail(page: Page, config: Config): Promise<Action
     logger.info('Gmail: OK - inbox accessible');
 
     try {
-      await browseGmail(page);
+      await browseGmail(page, config);
     } catch {
       logger.info('Gmail: Browse error, ignoring');
     }
@@ -160,7 +160,7 @@ export async function keepaliveTwitter(page: Page, config: Config): Promise<Acti
     logger.info('Twitter: OK - timeline accessible');
 
     try {
-      await browseTwitter(page);
+      await browseTwitter(page, config);
     } catch {
       logger.info('Twitter: Browse error, ignoring');
     }
@@ -189,7 +189,7 @@ export async function keepaliveDiscord(page: Page, config: Config): Promise<Acti
     logger.info('Discord: OK - channels accessible');
 
     try {
-      await browseDiscord(page);
+      await browseDiscord(page, config);
     } catch {
       logger.info('Discord: Browse error, ignoring');
     }
