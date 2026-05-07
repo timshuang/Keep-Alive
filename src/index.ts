@@ -1,27 +1,39 @@
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
 import { loadConfig } from './config';
 import { logger } from './logger';
 import { HubClient } from './hub/client';
-import { loadState, saveState, ensureAccountState, updatePlatformState, cleanOldDailyQueues, getTodayDate } from './state';
+import {
+  loadState,
+  saveState,
+  ensureAccountState,
+  updatePlatformState,
+  cleanOldDailyQueues,
+  getTodayDate,
+  syncAccountStates,
+  DailyQueue,
+  AppState,
+} from './state';
 import { connectCDP } from './cdp';
 import { keepaliveGmail, keepaliveTwitter, keepaliveDiscord, ActionOutcome } from './actions';
 import { Notifier } from './notifier';
 import { computeDailyQueue, getScheduleItems, applyFirstRunStagger, randomDelaySeconds } from './scheduler';
 import { PlatformName } from './detector';
+import { AccountEntry, loadAccountsFromDisk } from './accounts';
 
-interface AccountEntry {
-  containerCode: string;
-  containerName: string;
-  platforms: string[];
+const DAILY_WAKE_HOUR = 0;
+const DAILY_WAKE_MINUTE = 5;
+
+interface RuntimeContext {
+  currentDate: string | null;
+  accounts: AccountEntry[];
+  activeAccounts: AccountEntry[];
+  queue: DailyQueue | null;
 }
 
 function loadAccounts(): AccountEntry[] {
   try {
-    const accountsPath = path.resolve(process.cwd(), 'accounts.json');
-    const raw = fs.readFileSync(accountsPath, 'utf-8');
-    return JSON.parse(raw) as AccountEntry[];
+    return loadAccountsFromDisk();
   } catch (err) {
     logger.error(`Failed to load accounts.json: ${err}`);
     process.exit(1);
@@ -60,142 +72,101 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function main(): Promise<void> {
-  if (process.argv.includes('--reset')) {
-    const statePath = path.resolve(process.cwd(), 'state.json');
-    try {
-      if (fs.existsSync(statePath)) {
-        fs.unlinkSync(statePath);
-        logger.info('state.json deleted. System state has been reset.');
-      } else {
-        logger.info('state.json does not exist. Nothing to reset.');
-      }
-    } catch (err) {
-      logger.error(`Failed to delete state.json: ${err}`);
-      process.exit(1);
-    }
-    process.exit(0);
-  }
+function getActiveAccounts(accounts: AccountEntry[]): AccountEntry[] {
+  return accounts.filter(account => account.platforms.length > 0);
+}
 
-  const isTestMode = process.argv.includes('--test');
-  const isForceMode = process.argv.includes('--force');
+function getNextDailyWakeTime(now: Date = new Date()): Date {
+  const next = new Date(now);
+  next.setHours(DAILY_WAKE_HOUR, DAILY_WAKE_MINUTE, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next;
+}
+
+async function waitUntilNextDailyWindow(): Promise<void> {
+  const now = new Date();
+  const next = getNextDailyWakeTime(now);
+  const waitMs = next.getTime() - now.getTime();
+  const waitMinutes = Math.max(1, Math.ceil(waitMs / 60000));
+  logger.info(`Daily cycle complete. Sleeping until ${next.toLocaleString()} (${waitMinutes} min).`);
+  await sleep(waitMs);
+}
+
+async function applyDailyStartDelay(config: ReturnType<typeof loadConfig>, isTestMode: boolean): Promise<void> {
   if (isTestMode) {
-    logger.info('⚠️  TEST MODE: skipping random delay');
-  }
-  if (isForceMode) {
-    logger.info('⚠️  FORCE MODE: ignoring intervals, status checks, and daily queue cache');
+    logger.info('TEST MODE: skipping daily random delay');
+    return;
   }
 
-  logger.banner('Keepalive 启动中...', {});
+  const maxMinutes = config.scheduling.randomStartDelayMaxMin;
+  if (maxMinutes <= 0) {
+    return;
+  }
 
-  const config = loadConfig();
-  logger.info('Config loaded');
+  const delayMinutes = Math.floor(Math.random() * maxMinutes);
+  const delaySeconds = delayMinutes * 60;
+  logger.info(`Daily random start delay: ${delayMinutes} minutes`);
 
-  let accounts = loadAccounts();
-  logger.info(`Loaded ${accounts.length} accounts from accounts.json`);
-
-  const filterSet = parseFilterArg();
-  if (filterSet) {
-    const before = accounts.length;
-    accounts = filterAccounts(accounts, filterSet);
-    if (accounts.length === 0) {
-      logger.error(`--filter matched 0 accounts out of ${before}. Check your filter values.`);
-      process.exit(1);
+  for (let i = delaySeconds; i > 0; i -= 60) {
+    const remaining = Math.ceil(i / 60);
+    if (remaining % 30 === 0 || remaining <= 5) {
+      logger.info(`Starting daily run in ${remaining} minutes...`);
     }
-    const names = accounts.map(a => a.containerName).join(', ');
-    logger.info(`--filter: ${accounts.length}/${before} accounts selected (${names})`);
+    await sleep(Math.min(i, 60) * 1000);
   }
+}
 
-  const state = loadState();
-  logger.info('State loaded');
+function sendStatus(runtime: RuntimeContext, state: AppState, notifier: Notifier): void {
+  const date = runtime.currentDate ?? getTodayDate();
+  const queue = runtime.queue ?? state.dailyQueue[date];
+  const pausedCount = runtime.accounts.length - runtime.activeAccounts.length;
 
-  if (isForceMode) {
-    let resetCount = 0;
-    for (const account of accounts) {
-      const accountState = state.accounts[account.containerCode];
-      if (!accountState) continue;
-      for (const platform of account.platforms) {
-        const ps = accountState[platform];
-        if (ps && ps.status !== 'ok') {
-          logger.info(`[FORCE] Resetting ${account.containerName}/${platform}: ${ps.status} → ok`);
-          ps.status = 'ok';
-          ps.lastAlert = undefined;
-          ps.alertDetail = undefined;
-          resetCount++;
-        }
-      }
-    }
-    if (resetCount > 0) {
-      saveState(state);
-      logger.info(`[FORCE] Reset ${resetCount} platform(s) to ok status`);
-    }
-  }
+  const lines = [
+    `📮 ${date} 状态概览:`,
+    `  活跃账号: ${runtime.activeAccounts.length}`,
+    `  已暂停账号: ${pausedCount}`,
+  ];
 
-  for (const account of accounts) {
-    ensureAccountState(state, account.containerCode, account.platforms);
-  }
-
-  applyFirstRunStagger(accounts, state, config);
-  saveState(state);
-
-  const hub = new HubClient(config);
-  const notifier = new Notifier(config);
-
-  logger.info('Testing Telegram connection...');
-  const tgResult = await notifier.testConnection();
-  if (tgResult.ok) {
-    logger.success(`✅ Telegram 连接成功 (bot: @${tgResult.botUsername})`);
+  if (queue) {
+    lines.push(`  Gmail 队列: ${queue.gmail.length}`);
+    lines.push(`  Twitter 队列: ${queue.twitter.length}`);
+    lines.push(`  Discord 队列: ${queue.discord.length}`);
   } else {
-    if (config.telegram.apiProxy) {
-      logger.error(`❌ Telegram 连接失败（已配置代理 ${config.telegram.apiProxy}）。请检查代理地址是否正确、代理服务是否正常运行。`);
-    } else {
-      logger.error('❌ Telegram 连接失败（无法直连，请配置代理）。请在 .env 中配置 TG_API_PROXY 后重试。');
-    }
-    process.exit(1);
+    lines.push('  今日队列: 尚未生成');
   }
 
-  notifier.onReset = (code: string, platform: PlatformName) => {
-    updatePlatformState(state, code, platform, { status: 'ok', lastAlert: undefined, alertDetail: undefined });
-    notifier.send(`✅ 已重置 ${code}/${platform} 状态为 ok`);
-  };
+  lines.push('');
+  lines.push('异常账号:');
 
-  notifier.onStatus = () => {
-    const today = getTodayDate();
-    const queue = state.dailyQueue[today];
-    if (!queue) {
-      notifier.send('📋 今日尚未计算队列');
-      return;
+  let abnormalCount = 0;
+  for (const account of runtime.activeAccounts) {
+    const accountState = state.accounts[account.containerCode];
+    if (!accountState) {
+      continue;
     }
-
-    const lines = [
-      `📅 ${today} 队列:`,
-      `  Gmail: ${queue.gmail.length} 个`,
-      `  Twitter: ${queue.twitter.length} 个`,
-      `  Discord: ${queue.discord.length} 个`,
-      '',
-      '异常账号:',
-    ];
-
-    for (const [code, accState] of Object.entries(state.accounts)) {
-      for (const [platform, ps] of Object.entries(accState)) {
-        if ((ps as any).status !== 'ok') {
-          lines.push(`  ${code}/${platform}: ${(ps as any).status}`);
-        }
+    for (const platform of account.platforms) {
+      const ps = accountState[platform];
+      if (!ps || ps.status === 'ok') {
+        continue;
       }
+      abnormalCount++;
+      lines.push(`  ${account.containerCode}/${platform}: ${ps.status}`);
     }
+  }
 
-    notifier.send(lines.join('\n'));
-  };
+  if (abnormalCount === 0) {
+    lines.push('  无');
+  }
 
-  notifier.onReboot = () => {
-    spawn('node', [path.resolve(__dirname, 'index.js')], {
-      detached: true,
-      stdio: 'ignore',
-      cwd: process.cwd(),
-    }).unref();
-    process.exit(0);
-  };
+  void notifier.send(lines.join('\n'));
+}
 
+async function runEnvironmentPrecheck(
+  accounts: AccountEntry[],
+  hub: HubClient
+): Promise<Array<{ code: string; name: string; ok: boolean; detail: string }>> {
   logger.info('Running environment precheck...');
   const precheckResults: Array<{ code: string; name: string; ok: boolean; detail: string }> = [];
 
@@ -212,49 +183,98 @@ async function main(): Promise<void> {
     }
   }
 
-  await notifier.sendPrecheck(precheckResults);
+  return precheckResults;
+}
 
-  const hasFailures = precheckResults.some(r => !r.ok);
-  if (hasFailures) {
-    logger.error('Environment precheck failed. Stopping.');
-    await notifier.send('❌ 环境预检失败，程序已停止。请检查失败环境后重新运行。');
-    process.exit(1);
+async function runDailyCycle(
+  config: ReturnType<typeof loadConfig>,
+  state: AppState,
+  hub: HubClient,
+  notifier: Notifier,
+  runtime: RuntimeContext,
+  options: { isTestMode: boolean; isForceMode: boolean; filterSet: Set<string> | null }
+): Promise<void> {
+  const { isTestMode, isForceMode, filterSet } = options;
+  const today = getTodayDate();
+  runtime.currentDate = today;
+  runtime.queue = null;
+
+  let accounts = loadAccounts();
+  logger.info(`Loaded ${accounts.length} accounts from accounts.json`);
+
+  if (filterSet) {
+    const before = accounts.length;
+    accounts = filterAccounts(accounts, filterSet);
+    if (accounts.length === 0) {
+      logger.error(`--filter matched 0 accounts out of ${before}. Check your filter values.`);
+      process.exit(1);
+    }
+    const names = accounts.map(a => a.containerName).join(', ');
+    logger.info(`--filter: ${accounts.length}/${before} accounts selected (${names})`);
   }
 
-  await notifier.sendStartupGuide();
+  runtime.accounts = accounts;
+  runtime.activeAccounts = getActiveAccounts(accounts);
 
-  logger.banner('🎉 Keepalive 已启动', {
-    'Gmail 频率': `每 ${config.intervals.gmail - config.jitter.gmail}-${config.intervals.gmail + config.jitter.gmail} 天`,
-    'Twitter 频率': `每 ${config.intervals.twitter - config.jitter.twitter}-${config.intervals.twitter + config.jitter.twitter} 天`,
-    'Discord 频率': `每 ${config.intervals.discord - config.jitter.discord}-${config.intervals.discord + config.jitter.discord} 天`,
-  });
+  syncAccountStates(state, accounts);
+  cleanOldDailyQueues(state);
 
-  if (isTestMode) {
-    logger.info('TEST MODE: Skipping random delay');
-  } else {
-    const delayMinutes = Math.floor(Math.random() * config.scheduling.randomStartDelayMaxMin);
-    const delaySeconds = delayMinutes * 60;
-    logger.info(`Random start delay: ${delayMinutes} minutes`);
-
-    for (let i = delaySeconds; i > 0; i -= 60) {
-      const remaining = Math.ceil(i / 60);
-      if (remaining % 30 === 0 || remaining <= 5) {
-        logger.info(`Starting in ${remaining} minutes...`);
+  if (isForceMode) {
+    let resetCount = 0;
+    for (const account of runtime.activeAccounts) {
+      const accountState = state.accounts[account.containerCode];
+      if (!accountState) continue;
+      for (const platform of account.platforms) {
+        const ps = accountState[platform];
+        if (ps && ps.status !== 'ok') {
+          logger.info(`[FORCE] Resetting ${account.containerName}/${platform}: ${ps.status} -> ok`);
+          ps.status = 'ok';
+          ps.lastAlert = undefined;
+          ps.alertDetail = undefined;
+          resetCount++;
+        }
       }
-      await sleep(Math.min(i, 60) * 1000);
+    }
+    if (resetCount > 0) {
+      logger.info(`[FORCE] Reset ${resetCount} platform(s) to ok status`);
     }
   }
 
-  logger.info('Computing daily queue...');
-  const queue = computeDailyQueue(accounts, state, config, isForceMode);
+  for (const account of runtime.activeAccounts) {
+    ensureAccountState(state, account.containerCode, account.platforms);
+  }
+
+  applyFirstRunStagger(runtime.activeAccounts, state, config);
   saveState(state);
 
-  const items = getScheduleItems(accounts, queue);
+  if (runtime.activeAccounts.length === 0) {
+    logger.info('No active accounts configured for today.');
+    await notifier.send('📋 当前没有启用保活渠道的账号，今日跳过执行。');
+    return;
+  }
+
+  await applyDailyStartDelay(config, isTestMode);
+
+  const precheckResults = await runEnvironmentPrecheck(runtime.activeAccounts, hub);
+  await notifier.sendPrecheck(precheckResults);
+
+  if (precheckResults.some(result => !result.ok)) {
+    logger.error('Environment precheck failed for this daily cycle. Skipping execution until next day.');
+    await notifier.send('❌ 环境预检失败，今日保活已跳过。请检查未开启环境，新的账号配置将在下一自然日生效。');
+    return;
+  }
+
+  logger.info('Computing daily queue...');
+  const queue = computeDailyQueue(runtime.activeAccounts, state, config, isForceMode);
+  runtime.queue = queue;
+  saveState(state);
+
+  const items = getScheduleItems(runtime.activeAccounts, queue);
   logger.info(`Today's schedule: ${items.length} operations`);
 
   if (items.length === 0) {
-    logger.info('No accounts due for keepalive today.');
-    await notifier.send('📋 今日无账号需要保活。');
+    logger.info('No active accounts due for keepalive today.');
+    await notifier.send('📋 今日没有到期的活跃账号需要保活。');
     return;
   }
 
@@ -348,18 +368,113 @@ async function main(): Promise<void> {
   cleanOldDailyQueues(state);
   saveState(state);
 
-  await notifier.sendDailyReport(outcomes, accounts);
+  await notifier.sendDailyReport(outcomes, runtime.activeAccounts);
 
   logger.banner('Keepalive 完成', {
     '总操作': outcomes.length,
     '成功': outcomes.filter(o => o.success).length,
     '失败': outcomes.filter(o => !o.success).length,
   });
-
-  await notifier.stop();
 }
 
-main().catch(async (err) => {
+async function main(): Promise<void> {
+  if (process.argv.includes('--reset')) {
+    const statePath = path.resolve(process.cwd(), 'state.json');
+    try {
+      if (fs.existsSync(statePath)) {
+        fs.unlinkSync(statePath);
+        logger.info('state.json deleted. System state has been reset.');
+      } else {
+        logger.info('state.json does not exist. Nothing to reset.');
+      }
+    } catch (err) {
+      logger.error(`Failed to delete state.json: ${err}`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  const isTestMode = process.argv.includes('--test');
+  const isForceMode = process.argv.includes('--force');
+  const filterSet = parseFilterArg();
+
+  if (isTestMode) {
+    logger.info('TEST MODE: single daily cycle with no startup delay');
+  }
+  if (isForceMode) {
+    logger.info('FORCE MODE: ignoring intervals, status checks, and daily queue cache for this cycle');
+  }
+
+  logger.banner('Keepalive 服务启动中...', {});
+
+  const config = loadConfig();
+  const state = loadState();
+  const hub = new HubClient(config);
+  const notifier = new Notifier(config);
+  const runtime: RuntimeContext = {
+    currentDate: null,
+    accounts: [],
+    activeAccounts: [],
+    queue: null,
+  };
+
+  logger.info('Testing Telegram connection...');
+  const tgResult = await notifier.testConnection();
+  if (tgResult.ok) {
+    logger.success(`✅ Telegram 连接成功 (bot: @${tgResult.botUsername})`);
+  } else {
+    if (config.telegram.apiProxy) {
+      logger.error(`❌ Telegram 连接失败（已配置代理 ${config.telegram.apiProxy}）。请检查代理地址是否正确、代理服务是否正常运行。`);
+    } else {
+      logger.error('❌ Telegram 连接失败（无法直连，请配置代理）。请在 .env 中配置 TG_API_PROXY 后重试。');
+    }
+    process.exit(1);
+  }
+
+  notifier.onReset = (code: string, platform: PlatformName) => {
+    updatePlatformState(state, code, platform, { status: 'ok', lastAlert: undefined, alertDetail: undefined });
+    void notifier.send(`✅ 已重置 ${code}/${platform} 状态为 ok`);
+  };
+
+  notifier.onStatus = () => {
+    sendStatus(runtime, state, notifier);
+  };
+
+  notifier.onReboot = () => {
+    logger.info('TG: reboot requested, exiting process for PM2 restart');
+    process.exit(0);
+  };
+
+  await notifier.sendStartupGuide();
+
+  const singleRunMode = isTestMode || isForceMode || filterSet !== null;
+
+  try {
+    if (singleRunMode) {
+      await runDailyCycle(config, state, hub, notifier, runtime, { isTestMode, isForceMode, filterSet });
+      await notifier.stop();
+      return;
+    }
+
+    let lastProcessedDate: string | null = null;
+    while (true) {
+      const today = getTodayDate();
+      if (today !== lastProcessedDate) {
+        await runDailyCycle(config, state, hub, notifier, runtime, { isTestMode: false, isForceMode: false, filterSet: null });
+        lastProcessedDate = today;
+      }
+      if (getTodayDate() !== lastProcessedDate) {
+        continue;
+      }
+      await waitUntilNextDailyWindow();
+    }
+  } catch (err) {
+    await notifier.stop();
+    throw err;
+  }
+}
+
+main().catch(async err => {
   logger.error(`Fatal error: ${err}`);
   process.exit(1);
 });

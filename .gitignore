@@ -1,6 +1,7 @@
 node_modules/
 dist/
 logs/
+.pm2/
 .env
 accounts.json
 state.json

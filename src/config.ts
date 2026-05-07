@@ -45,6 +45,12 @@ export interface Config {
   };
 }
 
+export interface HubConfig {
+  host: string;
+  port: number;
+  baseUrl: string;
+}
+
 interface JsoncConfig {
   hub?: { host?: string; port?: number };
   intervals?: { gmail?: number; twitter?: number; discord?: number };
@@ -178,5 +184,17 @@ export function loadConfig(): Config {
       discordSecRange: jsonc.browse?.discordSecRange ?? DEFAULTS.browse!.discordSecRange!,
       gmailReadSecRange: jsonc.browse?.gmailReadSecRange ?? DEFAULTS.browse!.gmailReadSecRange!,
     },
+  };
+}
+
+export function loadHubConfig(): HubConfig {
+  const jsonc = loadJsoncConfig();
+  const hubHost = resolveHubHost(jsonc.hub?.host ?? DEFAULTS.hub!.host!);
+  const hubPort = jsonc.hub?.port ?? DEFAULTS.hub!.port!;
+
+  return {
+    host: hubHost,
+    port: hubPort,
+    baseUrl: `http://${hubHost}:${hubPort}`,
   };
 }

@@ -8,5 +8,10 @@
     "containerCode": "84794165",
     "containerName": "Account2-Twitter+DC",
     "platforms": ["twitter", "discord"]
+  },
+  {
+    "containerCode": "84794166",
+    "containerName": "Account3-Paused",
+    "platforms": []
   }
 ]

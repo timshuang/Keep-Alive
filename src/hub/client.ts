@@ -1,10 +1,11 @@
-import { Config } from '../config';
+import { Config, HubConfig } from '../config';
 import { logger } from '../logger';
 import {
   HubBrowserStartRequest,
   HubBrowserStartResponse,
   HubAllBrowserStatusResponse,
   HubEnvListResponse,
+  HubEnvListItem,
   HubErrorCode,
   HubBrowserStatusItem,
 } from './types';
@@ -12,7 +13,7 @@ import {
 export class HubClient {
   private baseUrl: string;
 
-  constructor(config: Config) {
+  constructor(config: Pick<Config, 'hub'> | { hub: HubConfig }) {
     this.baseUrl = config.hub.baseUrl;
   }
 
@@ -89,6 +90,28 @@ export class HubClient {
 
   async getEnvList(current: number = 1, size: number = 200): Promise<HubEnvListResponse> {
     return this.request<HubEnvListResponse>('/api/v1/env/list', 'POST', { current, size });
+  }
+
+  async getAllEnvList(size: number = 200): Promise<HubEnvListItem[]> {
+    const all: HubEnvListItem[] = [];
+    let current = 1;
+    let total = Number.POSITIVE_INFINITY;
+
+    while (all.length < total) {
+      const res = await this.getEnvList(current, size);
+      if (res.code !== HubErrorCode.SUCCESS || !res.data) {
+        throw new Error(`Hub: Failed to get env list, code=${res.code}, msg=${res.msg}`);
+      }
+
+      all.push(...res.data.list);
+      total = res.data.total;
+      if (res.data.list.length === 0) {
+        break;
+      }
+      current += 1;
+    }
+
+    return all;
   }
 
   async getOpenedContainerCodes(): Promise<Set<string>> {

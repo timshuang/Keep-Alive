@@ -37,6 +37,13 @@ function createDefaultPlatformState(): PlatformState {
   return { lastRun: null, status: 'ok' };
 }
 
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function loadState(): AppState {
   try {
     if (fs.existsSync(STATE_FILE)) {
@@ -73,6 +80,31 @@ export function ensureAccountState(state: AppState, containerCode: string, platf
   }
 }
 
+export function syncAccountStates(
+  state: AppState,
+  accounts: Array<{ containerCode: string; platforms: string[] }>
+): void {
+  const accountMap = new Map(accounts.map(account => [account.containerCode, new Set(account.platforms)]));
+
+  for (const containerCode of Object.keys(state.accounts)) {
+    const enabledPlatforms = accountMap.get(containerCode);
+    if (!enabledPlatforms || enabledPlatforms.size === 0) {
+      delete state.accounts[containerCode];
+      continue;
+    }
+
+    for (const platform of Object.keys(state.accounts[containerCode])) {
+      if (!enabledPlatforms.has(platform)) {
+        delete state.accounts[containerCode][platform];
+      }
+    }
+
+    if (Object.keys(state.accounts[containerCode]).length === 0) {
+      delete state.accounts[containerCode];
+    }
+  }
+}
+
 export function updatePlatformState(
   state: AppState,
   containerCode: string,
@@ -90,13 +122,13 @@ export function updatePlatformState(
 }
 
 export function getTodayDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
 }
 
 export function cleanOldDailyQueues(state: AppState, keepDays: number = 7): void {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - keepDays);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = formatLocalDate(cutoff);
 
   for (const date of Object.keys(state.dailyQueue)) {
     if (date < cutoffStr) {

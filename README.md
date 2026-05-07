@@ -253,3 +253,27 @@ POST /api/v1/browser/all-browser-status
 | containerCode 以 API 返回为准 | YAML 配置或手动记录的 containerCode 可能过时，以 `/api/v1/env/list` 返回为准 |
 | 已开环境再调 start 的行为 | 未开通权限 → 报错 `-10013`；开通权限 → 正常返回 `debuggingPort` |
 | Node.js 比 curl 更适合调 API | Windows PowerShell 下 curl 的 JSON 转义容易出错，Node.js `fetch`/`http` 模块更可靠 |
+---
+
+## PM2
+
+```bash
+# build dist/
+npm run build
+
+# start both keepalive-main and keepalive-admin
+npm run pm2:start
+
+# restart both apps
+npm run pm2:restart
+
+# stop both apps
+npm run pm2:stop
+
+# inspect recent logs
+npm run pm2:logs
+```
+
+- `keepalive-admin` keeps listening on `127.0.0.1:3210`
+- Health check: `http://127.0.0.1:3210/health`
+- The project-level pm2 runner first tries `pm2` from `PATH`, then falls back to the current npm global prefix, which makes Windows and WSL migration easier.
