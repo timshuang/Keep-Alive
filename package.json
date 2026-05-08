@@ -1,6 +1,6 @@
 {
   "name": "keepalive",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Social account keepalive via Hubstudio fingerprint browser",
   "main": "dist/index.js",
   "scripts": {
