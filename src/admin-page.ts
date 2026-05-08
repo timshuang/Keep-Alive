@@ -7,16 +7,13 @@ export function renderAdminPage(): string {
     <title>Keepalive 账号管理</title>
     <style>
       :root {
-        --bg: #f4efe8;
         --card: rgba(255, 255, 255, 0.88);
         --text: #1f2937;
         --muted: #6b7280;
         --line: rgba(148, 163, 184, 0.28);
         --brand: #d97706;
         --brand-strong: #b45309;
-        --danger: #dc2626;
         --danger-soft: rgba(254, 226, 226, 0.92);
-        --success: #15803d;
         --success-soft: rgba(220, 252, 231, 0.9);
         --info: #1d4ed8;
         --info-soft: rgba(219, 234, 254, 0.9);
@@ -73,7 +70,7 @@ export function renderAdminPage(): string {
       .subtitle {
         margin: 10px 0 0;
         color: var(--muted);
-        max-width: 620px;
+        max-width: 680px;
         line-height: 1.6;
       }
 
@@ -108,11 +105,6 @@ export function renderAdminPage(): string {
         color: var(--text);
         background: rgba(255, 255, 255, 0.82);
         border: 1px solid var(--line);
-      }
-
-      .danger-btn {
-        color: white;
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
       }
 
       .status {
@@ -326,7 +318,7 @@ export function renderAdminPage(): string {
       .dialog-copy {
         margin: 8px 0 0;
         color: var(--muted);
-        line-height: 1.5;
+        line-height: 1.6;
       }
 
       .close-btn {
@@ -407,10 +399,13 @@ export function renderAdminPage(): string {
           flex-direction: column;
           align-items: stretch;
         }
+
         .grid {
           grid-template-columns: 1fr;
         }
-        th:nth-child(3), td:nth-child(3) {
+
+        th:nth-child(3),
+        td:nth-child(3) {
           min-width: 220px;
         }
       }
@@ -422,20 +417,26 @@ export function renderAdminPage(): string {
           padding: 18px;
           border-radius: 24px;
         }
-        th, td {
+
+        th,
+        td {
           padding: 14px;
         }
+
         .check-grid {
           grid-template-columns: 1fr;
         }
+
         .row-actions {
           flex-direction: column;
           align-items: stretch;
         }
+
         .pager {
           flex-direction: column;
           align-items: stretch;
         }
+
         .pager-actions {
           justify-content: stretch;
         }
@@ -448,10 +449,11 @@ export function renderAdminPage(): string {
         <div>
           <p class="eyebrow">Keepalive Admin</p>
           <h1>账号管理页</h1>
-          <p class="subtitle">管理本地账号配置与保活渠道。</p>
+          <p class="subtitle">管理本地账号配置和保活渠道，以及重补今日保活任务</p>
         </div>
         <div class="actions">
           <button id="refreshBtn" class="secondary" type="button">刷新列表</button>
+          <button id="recoverTodayBtn" class="secondary" type="button">立刻重补今日任务</button>
           <button id="addBtn" class="primary" type="button">新增账号</button>
         </div>
       </section>
@@ -484,7 +486,7 @@ export function renderAdminPage(): string {
         <div class="dialog-header">
           <div>
             <h2 class="dialog-title" id="dialogTitle">新增账号</h2>
-            <p class="dialog-copy" id="dialogCopy">填写指纹环境信息并勾选需要保活的渠道。</p>
+            <p class="dialog-copy" id="dialogCopy">填写指纹环境信息并勾选需要保活的渠道；如果一个都不选，则表示暂停保活并保留在配置中。</p>
           </div>
           <button type="button" class="close-btn" id="closeDialogBtn">×</button>
         </div>
@@ -528,7 +530,7 @@ export function renderAdminPage(): string {
 
         <div class="dialog-footer">
           <button type="button" class="secondary" id="cancelBtn">取消</button>
-          <button type="submit" class="primary" id="saveBtn">保存</button>
+          <button type="submit" class="primary" id="saveBtn">保存账号</button>
         </div>
       </form>
     </dialog>
@@ -538,14 +540,31 @@ export function renderAdminPage(): string {
         <div class="dialog-header">
           <div>
             <h2 class="dialog-title">确认删除</h2>
-            <p class="dialog-copy" id="confirmCopy">删除后会立即从 accounts.json 中移除。</p>
+            <p class="dialog-copy" id="confirmCopy">删除后会立刻从 accounts.json 中移除。</p>
           </div>
           <button type="button" class="close-btn" id="closeConfirmBtn">×</button>
         </div>
 
         <div class="dialog-footer">
           <button type="button" class="secondary" id="cancelConfirmBtn">取消</button>
-          <button type="button" class="danger-btn" id="confirmDeleteBtn">确认删除</button>
+          <button type="button" class="primary" id="confirmDeleteBtn">确认删除</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="recoverDialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <div>
+            <h2 class="dialog-title">立刻重补今日任务</h2>
+            <p class="dialog-copy">今日任务尚未开始或预检失败时，手动立即预检并重补今日未完成保活任务。</p>
+          </div>
+          <button type="button" class="close-btn" id="closeRecoverBtn">×</button>
+        </div>
+
+        <div class="dialog-footer">
+          <button type="button" class="secondary" id="cancelRecoverBtn">取消</button>
+          <button type="button" class="primary" id="confirmRecoverBtn">确认重补</button>
         </div>
       </div>
     </dialog>
@@ -558,7 +577,17 @@ export function renderAdminPage(): string {
         currentPage: 1,
         pageSize: 10,
         pendingDeleteCode: null,
+        isRecoveringToday: false,
+        runtimeStatus: {
+          phase: 'starting',
+          canRecover: false,
+          recoveryInProgress: false,
+          message: '服务启动中',
+        },
+        runtimePollTimer: null,
       };
+
+      const POLL_INTERVAL_MS = 1500;
 
       const tableBody = document.getElementById('tableBody');
       const statusEl = document.getElementById('status');
@@ -575,14 +604,23 @@ export function renderAdminPage(): string {
       const saveBtn = document.getElementById('saveBtn');
       const confirmDialog = document.getElementById('confirmDialog');
       const confirmCopy = document.getElementById('confirmCopy');
+      const recoverDialog = document.getElementById('recoverDialog');
+      const closeRecoverBtn = document.getElementById('closeRecoverBtn');
+      const cancelRecoverBtn = document.getElementById('cancelRecoverBtn');
+      const confirmRecoverBtn = document.getElementById('confirmRecoverBtn');
+      const recoverTodayBtn = document.getElementById('recoverTodayBtn');
 
       document.getElementById('refreshBtn').addEventListener('click', () => loadAccounts(true));
+      recoverTodayBtn.addEventListener('click', openRecoverDialog);
       document.getElementById('addBtn').addEventListener('click', openCreateDialog);
       document.getElementById('closeDialogBtn').addEventListener('click', closeDialog);
       document.getElementById('cancelBtn').addEventListener('click', closeDialog);
       document.getElementById('closeConfirmBtn').addEventListener('click', closeConfirmDialog);
       document.getElementById('cancelConfirmBtn').addEventListener('click', closeConfirmDialog);
       document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDeleteAccount);
+      closeRecoverBtn.addEventListener('click', closeRecoverDialog);
+      cancelRecoverBtn.addEventListener('click', closeRecoverDialog);
+      confirmRecoverBtn.addEventListener('click', recoverToday);
       form.addEventListener('submit', onSubmit);
 
       async function api(url, options) {
@@ -592,7 +630,7 @@ export function renderAdminPage(): string {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload.error || '请求失败，请稍后重试');
+          throw new Error(payload.error || payload.message || '请求失败，请稍后重试');
         }
         return payload;
       }
@@ -631,6 +669,97 @@ export function renderAdminPage(): string {
         }
       }
 
+      function getRecoverButtonLabel(runtime) {
+        if (state.isRecoveringToday || runtime.recoveryInProgress) {
+          return '正在重补今日任务...';
+        }
+        if (runtime.phase === 'running') {
+          return '今日保活执行中';
+        }
+        if (runtime.phase === 'completed') {
+          return '今日任务已完成';
+        }
+        return '立刻重补今日任务';
+      }
+
+      function getStatusStyle(runtime) {
+        if (state.isRecoveringToday || runtime.recoveryInProgress) {
+          return 'info';
+        }
+        if (runtime.phase === 'precheck_failed') {
+          return 'error';
+        }
+        if (runtime.phase === 'completed') {
+          return 'success';
+        }
+        return 'info';
+      }
+
+      function shouldShowRuntimeStatus(runtime) {
+        return Boolean(runtime.message) && !state.isRecoveringToday;
+      }
+
+      function isStableRuntimePhase(runtime) {
+        return runtime.recoveryInProgress === false &&
+          (runtime.phase === 'precheck_failed' || runtime.phase === 'running' || runtime.phase === 'completed');
+      }
+
+      function stopRuntimePolling() {
+        if (state.runtimePollTimer) {
+          clearTimeout(state.runtimePollTimer);
+          state.runtimePollTimer = null;
+        }
+      }
+
+      function syncRecoverControls() {
+        const runtime = state.runtimeStatus || {};
+        const canRecover = Boolean(runtime.canRecover) && !state.isRecoveringToday;
+        recoverTodayBtn.disabled = !canRecover;
+        recoverTodayBtn.title = runtime.message || '';
+        recoverTodayBtn.textContent = getRecoverButtonLabel(runtime);
+        closeRecoverBtn.disabled = state.isRecoveringToday;
+        cancelRecoverBtn.disabled = state.isRecoveringToday;
+        confirmRecoverBtn.disabled = state.isRecoveringToday || !Boolean(runtime.canRecover);
+        confirmRecoverBtn.textContent = state.isRecoveringToday ? '正在提交...' : '确认重补';
+
+        if (shouldShowRuntimeStatus(runtime)) {
+          setStatus(getStatusStyle(runtime), runtime.message);
+        }
+      }
+
+      async function loadRuntimeStatus() {
+        const payload = await api('/api/runtime-status');
+        state.runtimeStatus = payload;
+        syncRecoverControls();
+        return payload;
+      }
+
+      async function pollRuntimeStatusUntilStable() {
+        stopRuntimePolling();
+
+        const tick = async () => {
+          try {
+            const runtime = await loadRuntimeStatus();
+            if (isStableRuntimePhase(runtime)) {
+              state.isRecoveringToday = false;
+              syncRecoverControls();
+              stopRuntimePolling();
+              return;
+            }
+          } catch (error) {
+            setStatus('error', error.message || '获取运行状态失败');
+            state.isRecoveringToday = false;
+            syncRecoverControls();
+            stopRuntimePolling();
+            return;
+          }
+
+          state.runtimePollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+        };
+
+        state.runtimePollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+      }
+
       function renderPager() {
         if (!state.accounts.length) {
           pager.hidden = true;
@@ -646,17 +775,11 @@ export function renderAdminPage(): string {
         pagerMeta.textContent = '共 ' + state.accounts.length + ' 条，当前第 ' + state.currentPage + ' / ' + totalPages + ' 页，显示 ' + start + '-' + end + ' 条';
 
         const buttons = [];
-        buttons.push(
-          '<button class="pager-btn" type="button" data-page="' + (state.currentPage - 1) + '" ' + (state.currentPage === 1 ? 'disabled' : '') + '>上一页</button>'
-        );
+        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage - 1) + '" ' + (state.currentPage === 1 ? 'disabled' : '') + '>上一页</button>');
         for (let page = 1; page <= totalPages; page++) {
-          buttons.push(
-            '<button class="pager-btn' + (page === state.currentPage ? ' active' : '') + '" type="button" data-page="' + page + '">' + page + '</button>'
-          );
+          buttons.push('<button class="pager-btn' + (page === state.currentPage ? ' active' : '') + '" type="button" data-page="' + page + '">' + page + '</button>');
         }
-        buttons.push(
-          '<button class="pager-btn" type="button" data-page="' + (state.currentPage + 1) + '" ' + (state.currentPage === totalPages ? 'disabled' : '') + '>下一页</button>'
-        );
+        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage + 1) + '" ' + (state.currentPage === totalPages ? 'disabled' : '') + '>下一页</button>');
 
         pagerActions.innerHTML = buttons.join('');
         pagerActions.querySelectorAll('button[data-page]').forEach(button => {
@@ -683,9 +806,7 @@ export function renderAdminPage(): string {
 
         tableBody.innerHTML = currentAccounts.map(account => {
           const platforms = account.platforms.length > 0
-            ? account.platforms.map(platform =>
-                '<span class="chip">' + escapeHtml(platform) + '</span>'
-              ).join('')
+            ? account.platforms.map(platform => '<span class="chip">' + escapeHtml(platform) + '</span>').join('')
             : '<span class="chip muted">已暂停</span>';
 
           return '<tr>' +
@@ -765,7 +886,7 @@ export function renderAdminPage(): string {
         if (!account) return;
 
         state.pendingDeleteCode = code;
-        confirmCopy.textContent = '确认删除指纹环境 ' + account.containerName + '（' + account.containerCode + '）吗？删除后会立即从 accounts.json 中移除。';
+        confirmCopy.textContent = '确认删除指纹环境 ' + account.containerName + '（' + account.containerCode + '）吗？删除后会立刻从 accounts.json 中移除。';
         confirmDialog.showModal();
       }
 
@@ -778,18 +899,58 @@ export function renderAdminPage(): string {
         confirmDialog.close();
       }
 
+      function openRecoverDialog() {
+        if (!state.runtimeStatus.canRecover || state.isRecoveringToday) {
+          if (state.runtimeStatus.message) {
+            setStatus(getStatusStyle(state.runtimeStatus), state.runtimeStatus.message);
+          }
+          return;
+        }
+        syncRecoverControls();
+        recoverDialog.showModal();
+      }
+
+      function closeRecoverDialog(force) {
+        if (state.isRecoveringToday && !force) {
+          return;
+        }
+        recoverDialog.close();
+      }
+
+      async function recoverToday() {
+        state.isRecoveringToday = true;
+        syncRecoverControls();
+
+        try {
+          setStatus('info', '正在立即预检，预检通过后会重补今日未完成保活任务...');
+          const payload = await api('/api/system/recover-today', { method: 'POST' });
+          setStatus('success', payload.message || '已开始立刻重补今日任务。');
+          closeRecoverDialog(true);
+          await loadRuntimeStatus();
+          pollRuntimeStatusUntilStable();
+        } catch (error) {
+          state.isRecoveringToday = false;
+          setStatus('error', error.message || '立刻重补今日任务失败');
+          await loadRuntimeStatus().catch(() => {});
+          syncRecoverControls();
+        }
+      }
+
       async function loadAccounts(showMessage) {
         try {
           if (showMessage) {
             setStatus('info', '正在刷新账号列表...');
           }
-          const payload = await api('/api/accounts');
-          state.accounts = payload.accounts || [];
+          const [accountsPayload] = await Promise.all([
+            api('/api/accounts'),
+            loadRuntimeStatus(),
+          ]);
+          state.accounts = accountsPayload.accounts || [];
           state.currentPage = 1;
           renderAccounts();
           if (showMessage) {
             setStatus('success', '账号列表已刷新。');
-          } else {
+          } else if (!state.runtimeStatus.message) {
             clearStatus();
           }
         } catch (error) {

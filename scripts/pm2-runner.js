@@ -49,11 +49,30 @@ function resolveFromNpmPrefix() {
   return null;
 }
 
-function resolvePm2Command() {
-  return resolveFromPath() || resolveFromNpmPrefix();
+function resolveFromKnownLocations() {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  const candidates = [
+    path.join(process.env.APPDATA || '', 'npm', 'pm2.cmd'),
+    path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming', 'npm', 'pm2.cmd'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
-function runPm2(subcommand) {
+function resolvePm2Command() {
+  return resolveFromPath() || resolveFromNpmPrefix() || resolveFromKnownLocations();
+}
+
+function runPm2(subcommand, target) {
   ensureLogsDir();
 
   const pm2 = resolvePm2Command();
@@ -65,31 +84,39 @@ function runPm2(subcommand) {
   let args;
   switch (subcommand) {
     case 'start':
-      args = ['start', ecosystemPath];
+      args = ['start', target || ecosystemPath];
       break;
     case 'restart':
-      args = ['restart', ecosystemPath];
+      args = ['restart', target || ecosystemPath];
       break;
     case 'stop':
-      args = ['stop', ecosystemPath];
+      args = ['stop', target || ecosystemPath];
       break;
     case 'logs':
-      args = ['logs', '--lines', '100'];
+      args = target ? ['logs', target, '--lines', '100'] : ['logs', '--lines', '100'];
       break;
     default:
       console.error(`Unsupported pm2 command: ${subcommand}`);
       process.exit(1);
   }
 
-  const result = spawnSync(pm2, args, {
-    cwd: root,
-    stdio: 'inherit',
-    shell: process.platform === 'win32' && pm2.toLowerCase().endsWith('.cmd'),
-    env: {
-      ...process.env,
-      PM2_HOME: pm2Home,
-    },
-  });
+  const env = {
+    ...process.env,
+    PM2_HOME: pm2Home,
+  };
+
+  const isWindowsCmd = process.platform === 'win32' && pm2.toLowerCase().endsWith('.cmd');
+  const result = isWindowsCmd
+    ? spawnSync('cmd.exe', ['/d', '/c', pm2, ...args], {
+        cwd: root,
+        stdio: 'inherit',
+        env,
+      })
+    : spawnSync(pm2, args, {
+        cwd: root,
+        stdio: 'inherit',
+        env,
+      });
 
   if (typeof result.status === 'number') {
     process.exit(result.status);
@@ -99,4 +126,4 @@ function runPm2(subcommand) {
   process.exit(1);
 }
 
-runPm2(process.argv[2]);
+runPm2(process.argv[2], process.argv[3]);

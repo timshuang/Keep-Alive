@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { startAdminServer, RuntimeStatusPayload } from './admin-server';
 import { loadConfig } from './config';
 import { logger } from './logger';
 import { HubClient } from './hub/client';
@@ -24,11 +25,108 @@ import { AccountEntry, loadAccountsFromDisk } from './accounts';
 const DAILY_WAKE_HOUR = 0;
 const DAILY_WAKE_MINUTE = 5;
 
+type RuntimePhase = RuntimeStatusPayload['phase'];
+type DailyCycleMode = 'automatic' | 'manual-recover';
+
 interface RuntimeContext {
   currentDate: string | null;
   accounts: AccountEntry[];
   activeAccounts: AccountEntry[];
   queue: DailyQueue | null;
+}
+
+interface DailyCycleOptions {
+  isTestMode: boolean;
+  isForceMode: boolean;
+  filterSet: Set<string> | null;
+  skipStartDelay: boolean;
+  mode: DailyCycleMode;
+}
+
+interface DailyCycleResult {
+  status: 'completed' | 'precheck_failed' | 'interrupted';
+}
+
+interface RuntimeControl {
+  setPhase: (phase: RuntimePhase, message: string) => void;
+  getSnapshot: () => RuntimeStatusPayload;
+  registerWaitCanceler: (canceler: (() => void) | null) => void;
+  requestManualRecover: () => { success: boolean; message: string };
+  consumeManualRecoverRequest: () => boolean;
+  finishManualRecover: () => void;
+}
+
+function createRuntimeControl(): RuntimeControl {
+  let phase: RuntimePhase = 'starting';
+  let message = '服务启动中';
+  let recoveryInProgress = false;
+  let manualRecoverRequested = false;
+  let waitCanceler: (() => void) | null = null;
+
+  function setPhase(nextPhase: RuntimePhase, nextMessage: string): void {
+    phase = nextPhase;
+    message = nextMessage;
+  }
+
+  function canRecover(): boolean {
+    return !recoveryInProgress && (phase === 'idle_waiting' || phase === 'precheck_failed');
+  }
+
+  return {
+    setPhase,
+    getSnapshot: () => ({
+      phase,
+      canRecover: canRecover(),
+      recoveryInProgress,
+      message,
+    }),
+    registerWaitCanceler: canceler => {
+      waitCanceler = canceler;
+    },
+    requestManualRecover: () => {
+      if (recoveryInProgress) {
+        return { success: false, message: '当前正在恢复今日任务，请稍候。' };
+      }
+
+      if (phase === 'running') {
+        return { success: false, message: '当前任务执行中，无需重复触发。' };
+      }
+
+      if (phase === 'completed') {
+        return { success: false, message: '今日任务已完成，不会重复启动。' };
+      }
+
+      if (phase === 'starting') {
+        return { success: false, message: '服务仍在启动中，请稍后再试。' };
+      }
+
+      if (phase !== 'idle_waiting' && phase !== 'precheck_failed') {
+        return { success: false, message: '当前状态不支持手动恢复。' };
+      }
+
+      manualRecoverRequested = true;
+      recoveryInProgress = true;
+      message = '已收到手动恢复请求，准备立即预检。';
+
+      if (waitCanceler) {
+        const cancel = waitCanceler;
+        waitCanceler = null;
+        cancel();
+      }
+
+      return { success: true, message: '已开始立即预检，预检通过后会继续今日未完成任务。' };
+    },
+    consumeManualRecoverRequest: () => {
+      if (!manualRecoverRequested) {
+        return false;
+      }
+      manualRecoverRequested = false;
+      return true;
+    },
+    finishManualRecover: () => {
+      recoveryInProgress = false;
+    },
+  };
 }
 
 function loadAccounts(): AccountEntry[] {
@@ -72,6 +170,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function sleepInterruptibly(ms: number, runtimeControl: RuntimeControl): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      runtimeControl.registerWaitCanceler(null);
+      resolve(true);
+    }, ms);
+
+    runtimeControl.registerWaitCanceler(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      runtimeControl.registerWaitCanceler(null);
+      resolve(false);
+    });
+  });
+}
+
 function getActiveAccounts(accounts: AccountEntry[]): AccountEntry[] {
   return accounts.filter(account => account.platforms.length > 0);
 }
@@ -85,37 +203,59 @@ function getNextDailyWakeTime(now: Date = new Date()): Date {
   return next;
 }
 
-async function waitUntilNextDailyWindow(): Promise<void> {
+async function waitUntilNextDailyWindow(runtimeControl: RuntimeControl): Promise<boolean> {
   const now = new Date();
   const next = getNextDailyWakeTime(now);
   const waitMs = next.getTime() - now.getTime();
   const waitMinutes = Math.max(1, Math.ceil(waitMs / 60000));
-  logger.info(`Daily cycle complete. Sleeping until ${next.toLocaleString()} (${waitMinutes} min).`);
-  await sleep(waitMs);
+  logger.info(`Sleeping until ${next.toLocaleString()} (${waitMinutes} min).`);
+  return sleepInterruptibly(waitMs, runtimeControl);
 }
 
-async function applyDailyStartDelay(config: ReturnType<typeof loadConfig>, isTestMode: boolean): Promise<void> {
-  if (isTestMode) {
-    logger.info('TEST MODE: skipping daily random delay');
-    return;
+async function applyDailyStartDelay(
+  config: ReturnType<typeof loadConfig>,
+  isTestMode: boolean,
+  skipStartDelay: boolean,
+  runtimeControl: RuntimeControl
+): Promise<boolean> {
+  if (isTestMode || skipStartDelay) {
+    if (isTestMode) {
+      logger.info('TEST MODE: skipping daily random delay');
+    } else {
+      logger.info('Manual recover: skipping daily random delay');
+    }
+    return true;
   }
 
   const maxMinutes = config.scheduling.randomStartDelayMaxMin;
   if (maxMinutes <= 0) {
-    return;
+    return true;
   }
 
   const delayMinutes = Math.floor(Math.random() * maxMinutes);
   const delaySeconds = delayMinutes * 60;
   logger.info(`Daily random start delay: ${delayMinutes} minutes`);
 
-  for (let i = delaySeconds; i > 0; i -= 60) {
-    const remaining = Math.ceil(i / 60);
-    if (remaining % 30 === 0 || remaining <= 5) {
-      logger.info(`Starting daily run in ${remaining} minutes...`);
-    }
-    await sleep(Math.min(i, 60) * 1000);
+  if (delaySeconds <= 0) {
+    return true;
   }
+
+  runtimeControl.setPhase('idle_waiting', `今日任务等待随机延迟结束，约 ${delayMinutes} 分钟后开始。`);
+
+  for (let remainingSeconds = delaySeconds; remainingSeconds > 0; remainingSeconds -= 60) {
+    const remainingMinutes = Math.ceil(remainingSeconds / 60);
+    if (remainingMinutes % 30 === 0 || remainingMinutes <= 5) {
+      logger.info(`Starting daily run in ${remainingMinutes} minutes...`);
+    }
+
+    const slept = await sleepInterruptibly(Math.min(remainingSeconds, 60) * 1000, runtimeControl);
+    if (!slept) {
+      logger.info('Daily random delay interrupted by manual recover request.');
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function sendStatus(runtime: RuntimeContext, state: AppState, notifier: Notifier): void {
@@ -124,17 +264,17 @@ function sendStatus(runtime: RuntimeContext, state: AppState, notifier: Notifier
   const pausedCount = runtime.accounts.length - runtime.activeAccounts.length;
 
   const lines = [
-    `📮 ${date} 状态概览:`,
-    `  活跃账号: ${runtime.activeAccounts.length}`,
-    `  已暂停账号: ${pausedCount}`,
+    `📦 ${date} 状态概览`,
+    `活跃账号: ${runtime.activeAccounts.length}`,
+    `已暂停账号: ${pausedCount}`,
   ];
 
   if (queue) {
-    lines.push(`  Gmail 队列: ${queue.gmail.length}`);
-    lines.push(`  Twitter 队列: ${queue.twitter.length}`);
-    lines.push(`  Discord 队列: ${queue.discord.length}`);
+    lines.push(`Gmail 队列: ${queue.gmail.length}`);
+    lines.push(`Twitter 队列: ${queue.twitter.length}`);
+    lines.push(`Discord 队列: ${queue.discord.length}`);
   } else {
-    lines.push('  今日队列: 尚未生成');
+    lines.push('今日队列: 尚未生成');
   }
 
   lines.push('');
@@ -152,12 +292,12 @@ function sendStatus(runtime: RuntimeContext, state: AppState, notifier: Notifier
         continue;
       }
       abnormalCount++;
-      lines.push(`  ${account.containerCode}/${platform}: ${ps.status}`);
+      lines.push(`${account.containerCode}/${platform}: ${ps.status}`);
     }
   }
 
   if (abnormalCount === 0) {
-    lines.push('  无');
+    lines.push('无');
   }
 
   void notifier.send(lines.join('\n'));
@@ -192,9 +332,10 @@ async function runDailyCycle(
   hub: HubClient,
   notifier: Notifier,
   runtime: RuntimeContext,
-  options: { isTestMode: boolean; isForceMode: boolean; filterSet: Set<string> | null }
-): Promise<void> {
-  const { isTestMode, isForceMode, filterSet } = options;
+  runtimeControl: RuntimeControl,
+  options: DailyCycleOptions
+): Promise<DailyCycleResult> {
+  const { isTestMode, isForceMode, filterSet, skipStartDelay, mode } = options;
   const today = getTodayDate();
   runtime.currentDate = today;
   runtime.queue = null;
@@ -248,20 +389,31 @@ async function runDailyCycle(
   saveState(state);
 
   if (runtime.activeAccounts.length === 0) {
+    runtimeControl.setPhase('completed', '当前没有启用保活渠道的账号。');
     logger.info('No active accounts configured for today.');
-    await notifier.send('📋 当前没有启用保活渠道的账号，今日跳过执行。');
-    return;
+    await notifier.send('📭 当前没有启用保活渠道的账号，今日跳过执行。');
+    return { status: 'completed' };
   }
 
-  await applyDailyStartDelay(config, isTestMode);
+  const delayFinished = await applyDailyStartDelay(config, isTestMode, skipStartDelay, runtimeControl);
+  if (!delayFinished) {
+    return { status: 'interrupted' };
+  }
+
+  runtimeControl.setPhase('running', mode === 'manual-recover' ? '正在执行手动预检。' : '正在执行今日环境预检。');
 
   const precheckResults = await runEnvironmentPrecheck(runtime.activeAccounts, hub);
   await notifier.sendPrecheck(precheckResults);
 
   if (precheckResults.some(result => !result.ok)) {
+    runtimeControl.setPhase('precheck_failed', '环境预检失败，可手动补开指纹环境后再次恢复。');
     logger.error('Environment precheck failed for this daily cycle. Skipping execution until next day.');
     await notifier.send('❌ 环境预检失败，今日保活已跳过。请检查未开启环境，新的账号配置将在下一自然日生效。');
-    return;
+    return { status: 'precheck_failed' };
+  }
+
+  if (mode === 'manual-recover') {
+    await notifier.send('✅ 手动预检已通过，开始恢复今日未完成任务。');
   }
 
   logger.info('Computing daily queue...');
@@ -269,14 +421,24 @@ async function runDailyCycle(
   runtime.queue = queue;
   saveState(state);
 
-  const items = getScheduleItems(runtime.activeAccounts, queue);
+  const items = getScheduleItems(runtime.activeAccounts, queue, state);
   logger.info(`Today's schedule: ${items.length} operations`);
 
   if (items.length === 0) {
+    runtimeControl.setPhase('completed', '今日任务已完成，无需额外恢复。');
     logger.info('No active accounts due for keepalive today.');
-    await notifier.send('📋 今日没有到期的活跃账号需要保活。');
-    return;
+    await notifier.send(mode === 'manual-recover'
+      ? 'ℹ️ 手动预检通过，但今日没有未完成的到期任务。'
+      : '📭 今日没有到期的活跃账号需要保活。');
+    return { status: 'completed' };
   }
+
+  runtimeControl.setPhase(
+    'running',
+    mode === 'manual-recover'
+      ? `正在恢复今日未完成任务，共 ${items.length} 项。`
+      : `正在执行今日任务，共 ${items.length} 项。`
+  );
 
   const outcomes: Array<ActionOutcome & { code: string; name: string }> = [];
 
@@ -375,6 +537,9 @@ async function runDailyCycle(
     '成功': outcomes.filter(o => o.success).length,
     '失败': outcomes.filter(o => !o.success).length,
   });
+
+  runtimeControl.setPhase('completed', '今日任务已完成，等待下一自然日。');
+  return { status: 'completed' };
 }
 
 async function main(): Promise<void> {
@@ -411,12 +576,23 @@ async function main(): Promise<void> {
   const state = loadState();
   const hub = new HubClient(config);
   const notifier = new Notifier(config);
+  const runtimeControl = createRuntimeControl();
   const runtime: RuntimeContext = {
     currentDate: null,
     accounts: [],
     activeAccounts: [],
     queue: null,
   };
+
+  await startAdminServer({
+    hub,
+    onRestartService: () => {
+      logger.info('Admin: restart requested, exiting process for PM2 restart');
+      process.exit(0);
+    },
+    onRecoverToday: async () => runtimeControl.requestManualRecover(),
+    getRuntimeStatus: () => runtimeControl.getSnapshot(),
+  });
 
   logger.info('Testing Telegram connection...');
   const tgResult = await notifier.testConnection();
@@ -451,7 +627,13 @@ async function main(): Promise<void> {
 
   try {
     if (singleRunMode) {
-      await runDailyCycle(config, state, hub, notifier, runtime, { isTestMode, isForceMode, filterSet });
+      await runDailyCycle(config, state, hub, notifier, runtime, runtimeControl, {
+        isTestMode,
+        isForceMode,
+        filterSet,
+        skipStartDelay: false,
+        mode: 'automatic',
+      });
       await notifier.stop();
       return;
     }
@@ -460,13 +642,48 @@ async function main(): Promise<void> {
     while (true) {
       const today = getTodayDate();
       if (today !== lastProcessedDate) {
-        await runDailyCycle(config, state, hub, notifier, runtime, { isTestMode: false, isForceMode: false, filterSet: null });
-        lastProcessedDate = today;
+        const result = await runDailyCycle(config, state, hub, notifier, runtime, runtimeControl, {
+          isTestMode: false,
+          isForceMode: false,
+          filterSet: null,
+          skipStartDelay: false,
+          mode: 'automatic',
+        });
+
+        if (result.status !== 'interrupted') {
+          lastProcessedDate = today;
+        }
       }
-      if (getTodayDate() !== lastProcessedDate) {
+
+      if (runtimeControl.consumeManualRecoverRequest()) {
+        const result = await runDailyCycle(config, state, hub, notifier, runtime, runtimeControl, {
+          isTestMode: false,
+          isForceMode: false,
+          filterSet: null,
+          skipStartDelay: true,
+          mode: 'manual-recover',
+        });
+        runtimeControl.finishManualRecover();
+        if (result.status !== 'interrupted') {
+          lastProcessedDate = getTodayDate();
+        }
         continue;
       }
-      await waitUntilNextDailyWindow();
+
+      const snapshot = runtimeControl.getSnapshot();
+      if (snapshot.phase === 'precheck_failed') {
+        const waited = await waitUntilNextDailyWindow(runtimeControl);
+        if (!waited) {
+          continue;
+        }
+        continue;
+      }
+
+      runtimeControl.setPhase('completed', snapshot.message || '今日任务已完成，等待下一自然日。');
+      const waited = await waitUntilNextDailyWindow(runtimeControl);
+      if (!waited) {
+        continue;
+      }
     }
   } catch (err) {
     await notifier.stop();

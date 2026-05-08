@@ -100,7 +100,7 @@ export function computeDailyQueue(
   return queue;
 }
 
-export function getScheduleItems(accounts: AccountConfig[], queue: DailyQueue): ScheduleItem[] {
+export function getScheduleItems(accounts: AccountConfig[], queue: DailyQueue, state?: AppState): ScheduleItem[] {
   const accountMap = new Map(accounts.map(a => [a.containerCode, a]));
   const items: ScheduleItem[] = [];
 
@@ -120,6 +120,18 @@ export function getScheduleItems(accounts: AccountConfig[], queue: DailyQueue): 
       if (platformKey !== 'gmail' && platformKey !== 'twitter' && platformKey !== 'discord') continue;
 
       if (queue[platformKey].includes(code)) {
+        const platformState = state?.accounts[code]?.[platform];
+        if (platformState) {
+          if (platformState.status !== 'ok') {
+            logger.info(`Scheduler: Skipping ${code}/${platform} during resume (status=${platformState.status})`);
+            continue;
+          }
+          if (isRunToday(platformState.lastRun)) {
+            logger.info(`Scheduler: Skipping ${code}/${platform} during resume (already run today)`);
+            continue;
+          }
+        }
+
         items.push({
           containerCode: code,
           containerName: account.containerName,
