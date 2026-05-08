@@ -18,7 +18,7 @@
 请先安装：
 
 - Git
-- Node.js `22.x`
+- Node.js
 - npm
 - PM2：`npm install -g pm2`
 
@@ -26,6 +26,7 @@
 
 - Hubstudio Connector 正在 `127.0.0.1:6873` 监听；如果不是，请先修改 [`config.jsonc`](F:\Projects2026\codex\Keepalive\config.jsonc)
 - 如果需要 GUI 与 API 同时工作，Hubstudio 客户端版本应满足要求
+- Windows 安装脚本会按默认地址 `127.0.0.1:6873` 做预检；如果你的 Connector 不在这个地址，请先安装，再手动修改 `config.jsonc`
 
 ## 一键部署
 
@@ -35,17 +36,23 @@
 install-windows.bat
 ```
 
-如果你想从仓库外直接开始，可以先单独下载 `install-windows.bat`，然后运行它。脚本会把项目 clone 到：
+如果你想从仓库外直接开始，可以先单独下载 `install-windows.bat`，把它放到你想作为安装根目录的文件夹中，然后双击运行。脚本会自动创建：
 
 ```text
-%USERPROFILE%\apps\keepalive
+install-windows.bat 所在目录\apps
+```
+
+并把项目 clone 到：
+
+```text
+install-windows.bat 所在目录\apps\keepalive
 ```
 
 脚本会自动完成：
 
-- 复用或创建部署目录
+- 复用现有 keepalive 仓库，或在脚本所在目录下创建 `apps\keepalive`
 - 校验 `git`、`node`、`npm`、`pm2`
-- 要求 Node.js `22.x`
+- 检查 Node.js 与 npm 是否可用
 - 缺失时初始化 `.env` 和 `accounts.json`
 - 提示填写 `TG_BOT_TOKEN`
 - 提示填写 `TG_CHAT_ID`
@@ -75,6 +82,7 @@ install-windows.bat
 - 把 [`accounts.json.example`](F:\Projects2026\codex\Keepalive\accounts.json.example) 里的示例账号替换掉
 - 保持为非空 JSON 数组
 - 每个账号都要包含 `containerCode`、`containerName`、`platforms`
+- 如果运行安装脚本时提示 `accounts.json` 未配置好，先编辑这个文件，再在脚本里选择重试即可
 
 ## 启动与 PM2
 

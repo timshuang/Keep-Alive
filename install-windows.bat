@@ -3,8 +3,9 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 set "REPO_URL=https://github.com/timshuang/Keep-Alive.git"
-set "DEFAULT_DIR=%USERPROFILE%\apps\keepalive"
-set "NODE_MAJOR_REQUIRED=22"
+set "SCRIPT_DIR=%~dp0"
+if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+set "DEFAULT_DIR=%SCRIPT_DIR%\apps\keepalive"
 set "ADMIN_HOST_DEFAULT=127.0.0.1"
 set "PROJECT_DIR="
 
@@ -12,34 +13,55 @@ call :main
 exit /b %ERRORLEVEL%
 
 :main
-call :ensure_command git "Install Git first, then rerun this script."
-if errorlevel 1 exit /b 1
+where git >nul 2>nul
+if errorlevel 1 (
+  call :fail 缺少必需命令：git
+  echo 请先安装 Git，然后重新运行此脚本。
+  exit /b 1
+)
+call :ok 已检测到 git
 
 call :locate_project_dir
 if errorlevel 1 exit /b 1
 
 cd /d "%PROJECT_DIR%" || (
-  call :fail Failed to enter project directory: "%PROJECT_DIR%"
+  call :fail 无法进入项目目录："%PROJECT_DIR%"
   exit /b 1
 )
 
-call :ensure_command node "Install Node.js 22.x first, then rerun this script."
-if errorlevel 1 exit /b 1
-call :ensure_command npm "Install npm with Node.js 22.x first, then rerun this script."
-if errorlevel 1 exit /b 1
-call :ensure_command pm2 "Install PM2 globally with: npm install -g pm2"
-if errorlevel 1 exit /b 1
+where node >nul 2>nul
+if errorlevel 1 (
+  call :fail 缺少必需命令：node
+  echo 请先安装 Node.js，然后重新运行此脚本。
+  exit /b 1
+)
+call :ok 已检测到 node
 
-call :validate_node_major
-if errorlevel 1 exit /b 1
+where npm >nul 2>nul
+if errorlevel 1 (
+  call :fail 缺少必需命令：npm
+  echo 请先安装 npm（通常随 Node.js 一起安装），然后重新运行此脚本。
+  exit /b 1
+)
+call :ok 已检测到 npm
+
+where pm2 >nul 2>nul
+if errorlevel 1 (
+  call :fail 缺少必需命令：pm2
+  echo 请先全局安装 PM2：npm install -g pm2
+  exit /b 1
+)
+call :ok 已检测到 pm2
 
 call :ensure_env_file
 if errorlevel 1 exit /b 1
 call :ensure_accounts_file
 if errorlevel 1 exit /b 1
-
-call :resolve_hub_host_port
+call :ensure_accounts_ready
 if errorlevel 1 exit /b 1
+
+set "HUB_HOST=127.0.0.1"
+set "HUB_PORT=6873"
 
 call :print_status_summary
 call :check_hub_connectivity
@@ -51,49 +73,40 @@ if errorlevel 1 exit /b 1
 call :ensure_optional_env_value TG_API_PROXY "Enter TG_API_PROXY (optional, press Enter to skip)"
 if errorlevel 1 exit /b 1
 
-echo.
-call :warn Edit accounts.json before the first production run:
-echo   "%PROJECT_DIR%\accounts.json"
-echo Demo accounts are rejected during startup validation.
-echo.
-
 set "PROCEED="
-set /p "PROCEED=Run npm install, npm run build, and start PM2 now? [Y/n]: "
+set /p "PROCEED=现在执行 npm install、npm run build，并启动 PM2 吗？[Y/n]: "
 if /i "%PROCEED%"=="n" goto :print_next_steps
 if /i "%PROCEED%"=="no" goto :print_next_steps
 
-call :validate_accounts_file
-if errorlevel 1 exit /b 1
-
-call :info Running npm install...
+call :info 正在执行 npm install...
 call npm install
 if errorlevel 1 (
-  call :fail npm install failed.
+  call :fail npm install 执行失败。
   exit /b 1
 )
 
-call :info Running npm run build...
+call :info 正在执行 npm run build...
 call npm run build
 if errorlevel 1 (
-  call :fail npm run build failed.
+  call :fail npm run build 执行失败。
   exit /b 1
 )
 
-call :info Starting PM2 with ADMIN_HOST=%ADMIN_HOST_DEFAULT%...
+call :info 正在使用 ADMIN_HOST=%ADMIN_HOST_DEFAULT% 启动 PM2...
 set "ADMIN_HOST=%ADMIN_HOST_DEFAULT%"
 call npm run pm2:start
 if errorlevel 1 (
-  call :fail PM2 start failed.
+  call :fail PM2 启动失败。
   exit /b 1
 )
 
 call :print_post_start_notes
-call :ok Windows deployment is ready.
+call :ok Windows 部署已完成。
 exit /b 0
 
 :print_next_steps
 echo.
-call :info Next steps:
+call :info 后续步骤：
 echo   cd /d "%PROJECT_DIR%"
 echo   npm install
 echo   npm run build
@@ -105,41 +118,40 @@ exit /b 0
 call :is_keepalive_repo_dir "%CD%"
 if not errorlevel 1 (
   set "PROJECT_DIR=%CD%"
-  call :ok Using current project directory: "!PROJECT_DIR!"
+  call :ok 使用当前项目目录："!PROJECT_DIR!"
   exit /b 0
 )
 
-set "SCRIPT_DIR=%~dp0"
 call :is_keepalive_repo_dir "%SCRIPT_DIR%"
 if not errorlevel 1 (
-  set "PROJECT_DIR=%SCRIPT_DIR:~0,-1%"
-  call :ok Using script directory as project directory: "!PROJECT_DIR!"
+  set "PROJECT_DIR=%SCRIPT_DIR%"
+  call :ok 使用脚本所在目录作为项目目录："!PROJECT_DIR!"
   exit /b 0
 )
 
 call :ensure_default_parent_dir
 if not exist "%DEFAULT_DIR%" (
-  call :info Cloning repository to "%DEFAULT_DIR%"...
+  call :info 正在克隆仓库到 "%DEFAULT_DIR%"...
   git clone "%REPO_URL%" "%DEFAULT_DIR%"
   if errorlevel 1 (
-    call :fail Failed to clone repository.
+    call :fail 仓库克隆失败。
     exit /b 1
   )
-  call :ok Repository cloned successfully.
+  call :ok 仓库克隆完成。
 )
 
 call :is_keepalive_repo_dir "%DEFAULT_DIR%"
 if errorlevel 1 (
-  call :fail Target directory exists but is not the keepalive repository: "%DEFAULT_DIR%"
+  call :fail 目标目录已存在，但不是 keepalive 仓库："%DEFAULT_DIR%"
   exit /b 1
 )
 
 set "PROJECT_DIR=%DEFAULT_DIR%"
-call :ok Using deployment directory: "%PROJECT_DIR%"
+call :ok 使用部署目录："%PROJECT_DIR%"
 exit /b 0
 
 :ensure_default_parent_dir
-if not exist "%USERPROFILE%\apps" mkdir "%USERPROFILE%\apps" >nul 2>nul
+if not exist "%SCRIPT_DIR%\apps" mkdir "%SCRIPT_DIR%\apps" >nul 2>nul
 exit /b 0
 
 :is_keepalive_repo_dir
@@ -149,40 +161,14 @@ findstr /c:"\"name\": \"keepalive\"" "%CHECK_DIR%\package.json" >nul 2>nul
 if errorlevel 1 exit /b 1
 exit /b 0
 
-:ensure_command
-where %~1 >nul 2>nul
-if errorlevel 1 (
-  call :fail Missing required command: %~1
-  echo %~2
-  exit /b 1
-)
-call :ok Found %~1
-exit /b 0
-
-:validate_node_major
-set "NODE_VERSION="
-for /f "delims=" %%A in ('node -v 2^>nul') do set "NODE_VERSION=%%A"
-if not defined NODE_VERSION (
-  call :fail Unable to read Node.js version.
-  exit /b 1
-)
-set "NODE_VERSION=%NODE_VERSION:v=%"
-for /f "tokens=1 delims=." %%A in ("%NODE_VERSION%") do set "NODE_MAJOR=%%A"
-if not "%NODE_MAJOR%"=="%NODE_MAJOR_REQUIRED%" (
-  call :fail Node.js %NODE_MAJOR_REQUIRED%.x is required, but found v%NODE_VERSION%.
-  exit /b 1
-)
-call :ok Node.js version is compatible: v%NODE_VERSION%
-exit /b 0
-
 :ensure_env_file
 if exist ".env" (
-  call :ok Reusing existing .env
+  call :ok 复用现有 .env
   exit /b 0
 )
 if exist ".env.example" (
   copy /y ".env.example" ".env" >nul
-  call :ok Created .env from .env.example
+  call :ok 已根据 .env.example 创建 .env
   exit /b 0
 )
 (
@@ -193,29 +179,20 @@ if exist ".env.example" (
   echo RESEND_API_KEY=
   echo ALERT_EMAIL=
 ) > ".env"
-call :ok Created fallback .env
+call :ok 已创建默认 .env
 exit /b 0
 
 :ensure_accounts_file
 if exist "accounts.json" (
-  call :ok Reusing existing accounts.json
+  call :ok 复用现有 accounts.json
   exit /b 0
 )
 if not exist "accounts.json.example" (
-  call :fail Missing accounts.json.example, cannot initialize accounts.json.
+  call :fail 缺少 accounts.json.example，无法初始化 accounts.json。
   exit /b 1
 )
 copy /y "accounts.json.example" "accounts.json" >nul
-call :ok Created accounts.json from accounts.json.example
-exit /b 0
-
-:resolve_hub_host_port
-set "HUB_HOST=127.0.0.1"
-set "HUB_PORT=6873"
-if not exist "config.jsonc" exit /b 0
-
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "$raw = Get-Content 'config.jsonc' -Raw; $m = [regex]::Match($raw, '\"host\"\s*:\s*\"([^\"]+)\"'); if ($m.Success) { $m.Groups[1].Value } else { '127.0.0.1' }"`) do set "HUB_HOST=%%A"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "$raw = Get-Content 'config.jsonc' -Raw; $m = [regex]::Match($raw, '\"port\"\s*:\s*(\d+)'); if ($m.Success) { $m.Groups[1].Value } else { '6873' }"`) do set "HUB_PORT=%%A"
+call :ok 已根据 accounts.json.example 创建 accounts.json
 exit /b 0
 
 :check_hub_connectivity
@@ -229,12 +206,12 @@ powershell -NoProfile -Command ^
   "  exit 1" ^
   "}"
 if errorlevel 1 (
-  call :warn Hubstudio Connector preflight failed at %HUB_HOST%:%HUB_PORT%.
-  echo Confirm Hubstudio Connector is running on this Windows host.
-  echo You can continue, but PM2 startup will fail if the Connector is unreachable.
+  call :warn Hubstudio Connector 预检失败：%HUB_HOST%:%HUB_PORT%
+  echo 请确认当前 Windows 主机上的 Hubstudio Connector 已启动。
+  echo 你仍可继续，但如果 Connector 不可达，后续 PM2 启动会失败。
   exit /b 0
 )
-call :ok Hubstudio Connector preflight succeeded at %HUB_HOST%:%HUB_PORT%
+call :ok Hubstudio Connector 预检通过：%HUB_HOST%:%HUB_PORT%
 exit /b 0
 
 :get_env_value
@@ -262,7 +239,7 @@ powershell -NoProfile -Command ^
   "if (-not $updated) { $result += '' + $key + '=' + $value };" ^
   "Set-Content -Path $path -Value $result -Encoding UTF8"
 if errorlevel 1 (
-  call :fail Failed to update .env for key %~1.
+  call :fail 更新 .env 中的 %~1 失败。
   exit /b 1
 )
 exit /b 0
@@ -270,7 +247,7 @@ exit /b 0
 :ensure_required_env_value
 call :get_env_value %~1 CURRENT_VALUE
 if defined CURRENT_VALUE (
-  call :ok %~1 is already configured
+  call :ok %~1 已配置
   exit /b 0
 )
 
@@ -278,86 +255,112 @@ if defined CURRENT_VALUE (
 set "INPUT_VALUE="
 set /p "INPUT_VALUE=%~2: "
 if not defined INPUT_VALUE (
-  call :warn %~1 cannot be empty.
+  call :warn %~1 不能为空。
   goto :prompt_required
 )
 set "ENV_KEY=%~1"
 set "ENV_VALUE=%INPUT_VALUE%"
 call :set_env_value %~1
 if errorlevel 1 exit /b 1
-call :ok Saved %~1 to .env
+call :ok 已将 %~1 写入 .env
 exit /b 0
 
 :ensure_optional_env_value
 call :get_env_value %~1 CURRENT_VALUE
 if defined CURRENT_VALUE (
-  call :ok %~1 is already configured
+  call :ok %~1 已配置
   exit /b 0
 )
 set "INPUT_VALUE="
 set /p "INPUT_VALUE=%~2: "
 if not defined INPUT_VALUE (
-  call :ok Skipped %~1
+  call :ok 已跳过 %~1
   exit /b 0
 )
 set "ENV_KEY=%~1"
 set "ENV_VALUE=%INPUT_VALUE%"
 call :set_env_value %~1
 if errorlevel 1 exit /b 1
-call :ok Saved %~1 to .env
+call :ok 已将 %~1 写入 .env
 exit /b 0
+
+:ensure_accounts_ready
+call :validate_accounts_file
+if not errorlevel 1 exit /b 0
+
+:accounts_retry_prompt
+echo.
+call :warn accounts.json 还未配置好。
+echo 当前文件可能仍包含示例账号，或缺少必填字段。
+echo 请先编辑：
+echo   "%PROJECT_DIR%\accounts.json"
+echo 如需参考，可查看 accounts.json.example。
+echo.
+set "ACCOUNTS_ACTION="
+set /p "ACCOUNTS_ACTION=编辑完成后输入 R 重试，或直接回车 / 输入 E 退出： "
+if /i "%ACCOUNTS_ACTION%"=="r" (
+  call :validate_accounts_file
+  if not errorlevel 1 exit /b 0
+  goto :accounts_retry_prompt
+)
+if "%ACCOUNTS_ACTION%"=="" (
+  call :warn 未启动 PM2。请先配置 accounts.json，再重新运行 install-windows.bat。
+  exit /b 1
+)
+if /i "%ACCOUNTS_ACTION%"=="e" (
+  call :warn 未启动 PM2。请先配置 accounts.json，再重新运行 install-windows.bat。
+  exit /b 1
+)
+echo 输入无效。请输入 R 重试，或直接回车 / 输入 E 退出。
+goto :accounts_retry_prompt
 
 :validate_accounts_file
 powershell -NoProfile -Command ^
   "$path = 'accounts.json';" ^
-  "if (-not (Test-Path $path)) { Write-Error 'accounts.json is missing.'; exit 1 }" ^
-  "try { $data = Get-Content $path -Raw | ConvertFrom-Json } catch { Write-Error 'accounts.json is not valid JSON.'; exit 1 }" ^
-  "if ($data -isnot [System.Array] -or $data.Count -eq 0) { Write-Error 'accounts.json must be a non-empty array.'; exit 1 }" ^
+  "if (-not (Test-Path $path)) { exit 1 }" ^
+  "try { $data = Get-Content $path -Raw | ConvertFrom-Json } catch { exit 1 }" ^
+  "if ($data -isnot [System.Array] -or $data.Count -eq 0) { exit 1 }" ^
   "$demoCodes = @('84794164', '84794165', '84794166');" ^
   "$demoNames = @('Account1-Twitter+Gmail+DC', 'Account2-Twitter+DC', 'Account3-Paused');" ^
   "foreach ($item in $data) {" ^
-  "  if (-not $item.containerCode -or -not $item.containerName) { Write-Error 'Each account requires containerCode and containerName.'; exit 1 }" ^
-  "  if ($null -eq $item.platforms) { Write-Error 'Each account requires a platforms array.'; exit 1 }" ^
-  "  if ($demoCodes -contains [string]$item.containerCode -or $demoNames -contains [string]$item.containerName) { Write-Error 'Replace demo accounts in accounts.json before startup.'; exit 1 }" ^
+  "  if (-not $item.containerCode -or -not $item.containerName) { exit 1 }" ^
+  "  if ($null -eq $item.platforms) { exit 1 }" ^
+  "  if ($demoCodes -contains [string]$item.containerCode -or $demoNames -contains [string]$item.containerName) { exit 1 }" ^
   "}"
-if errorlevel 1 (
-  call :fail accounts.json validation failed.
-  exit /b 1
-)
-call :ok accounts.json validation passed
-exit /b 0
+exit /b %ERRORLEVEL%
 
 :print_status_summary
 echo.
-echo Current status
+echo 当前状态
 echo ------------------------------
-echo Project Dir:     %PROJECT_DIR%
+echo 项目目录:       %PROJECT_DIR%
+for /f "delims=" %%A in ('node -v') do set "NODE_VERSION=%%A"
 echo Node.js:         %NODE_VERSION%
 for /f "delims=" %%A in ('npm -v') do set "NPM_VERSION=%%A"
 echo npm:             %NPM_VERSION%
-echo PM2:             available
+echo PM2:             可用
 echo Hub Connector:   %HUB_HOST%:%HUB_PORT%
-if exist ".env" echo .env:            present
-if exist "accounts.json" echo accounts.json:   present
+if exist ".env" echo .env:            已存在
+if exist "accounts.json" echo accounts.json:   已存在
 echo ------------------------------
 echo.
 exit /b 0
 
 :print_post_start_notes
 echo.
-echo PM2 commands:
+echo PM2 常用命令：
 echo   cd /d "%PROJECT_DIR%"
 echo   npm run pm2:logs
 echo   npm run pm2:restart
 echo   npm run pm2:stop
 echo.
-echo Health check:
+echo 健康检查：
 echo   http://127.0.0.1:3210/health
 echo.
-echo If localhost access is not enough for the admin page, restart with:
+echo 如果管理页需要对外监听，可改用：
 echo   set "ADMIN_HOST=0.0.0.0" ^&^& npm run pm2:restart
 echo.
-echo Log files:
+echo 日志文件：
 echo   "%PROJECT_DIR%\logs\pm2\keepalive.out.log"
 echo   "%PROJECT_DIR%\logs\pm2\keepalive.err.log"
 echo   "%PROJECT_DIR%\logs\keepalive-YYYY-MM-DD.log"
