@@ -18,6 +18,75 @@
 
 这样可以把 Node 服务放在 WSL 中统一管理，同时继续使用宿主机 Windows 的图形化指纹环境。
 
+## WSL 一键安装
+
+在 WSL 任意目录执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/timshuang/Keep-Alive/master/install.sh | bash
+```
+
+这一步只做：
+
+- 创建并使用 `~/apps/keepalive`
+- clone 或复用已有仓库
+- 预检 `git`、`curl`、`node`、`npm`、`pm2`
+- 将 Node.js 安装或升级到 `22.x`
+- 初始化 `.env` 与 `accounts.json`
+- 预检 WSL 到宿主机 Hubstudio Connector 的连通性
+
+这一步不会做任何交互输入，也不会卡在 `read`。
+
+## 第二步：进入目录做轻交互配置
+
+```bash
+cd ~/apps/keepalive
+bash install.sh
+```
+
+这一步会：
+
+- 显示当前状态摘要
+- 必填 `TG_BOT_TOKEN`
+- 必填 `TG_CHAT_ID`
+- 可选填写 `TG_API_PROXY`
+- 提示你手工编辑 `accounts.json`
+- 最后询问是否立即执行启动
+
+> `accounts.json` 不走终端逐项录入，保持手工编辑。
+
+> `.env` 采用纯 `KEY=value` 格式，注释请单独成行，不要写成 `KEY=value # comment`。
+
+## 正式启动默认策略
+
+如果在交互末尾选择立即启动，脚本会执行：
+
+```bash
+npm install
+npm run build
+ADMIN_HOST=127.0.0.1 npm run pm2:start
+```
+
+默认使用 `127.0.0.1`，优先保证安全性。
+
+先在 Windows 宿主机验证：
+
+```bash
+http://localhost:3210/health
+```
+
+如果宿主机访问不到，再考虑改为：
+
+```bash
+ADMIN_HOST=0.0.0.0 npm run pm2:restart
+```
+
+注意：
+
+- `0.0.0.0` 会扩大监听范围
+- 仅在 localhost 转发不可用时使用
+- 建议结合宿主机防火墙限制访问来源
+
 ## WSL 部署原则
 
 ### 1. 部署目录
@@ -60,84 +129,29 @@
 
 如果目标 WSL 网络模式下自动探测失效，再将 `hub.host` 手动改成宿主机实际可达 IP。
 
-### 3. 管理页访问方式
+## 当前需要配置的内容
 
-WSL 中建议用：
+### 必填
 
-```bash
-ADMIN_HOST=0.0.0.0
-```
+- `.env` 中的 `TG_BOT_TOKEN`
+- `.env` 中的 `TG_CHAT_ID`
+- `accounts.json`
 
-这样 Windows 宿主机优先可通过：
+### 可选
 
-```bash
-http://localhost:3210
-```
+- `.env` 中的 `TG_API_PROXY`
+- `.env` 中的 `RESEND_API_KEY`
+- `.env` 中的 `ALERT_EMAIL`
 
-访问管理页；若宿主机到 WSL 的 localhost 转发不可用，再改用 WSL IP。
+### 高级配置
 
-## 环境预检要求
+默认不进入首次交互，需要时再手工调整：
 
-WSL 正式部署前必须先检查：
-
-- `node`
-- `npm`
-- `pm2`
-
-处理规则：
-
-- `node` 不存在：安装 `Node.js 22.x`
-- `node` 已存在但主版本不是 `22`：升级到 `22.x`
-- `npm` 缺失：补装
-- `pm2` 缺失：全局安装
-- 已满足要求：跳过，不重复安装
-
-仓库内的 [install.sh](/F:/Projects2026/codex/Keepalive/install.sh) 已按这套规则更新。
-
-## 快速安装
-
-在 WSL 中执行：
-
-```bash
-bash install.sh
-```
-
-脚本会：
-
-- 检查并安装 `git`、`curl`
-- 预检 `node` / `npm` / `pm2`
-- 将 Node.js 安装或升级到 `22.x`
-- 初始化 `.env` 与 `accounts.json`
-- 预检 WSL 到宿主机 Hubstudio Connector 的连通性
-
-## 正式启动
-
-### 1. 安装依赖并构建
-
-```bash
-npm install
-npm run build
-```
-
-### 2. 用 PM2 启动
-
-```bash
-ADMIN_HOST=0.0.0.0 npm run pm2:start
-```
-
-常用命令：
-
-```bash
-npm run pm2:restart
-npm run pm2:stop
-npm run pm2:logs
-```
-
-### 3. 健康检查
-
-```bash
-http://localhost:3210/health
-```
+- `config.jsonc` 中的 `hub.host` / `hub.port`
+- `intervals`
+- `jitter`
+- `scheduling`
+- `browse`
 
 ## 管理页
 
@@ -152,6 +166,16 @@ http://localhost:3210/health
 - 健康检查：`/health`
 - 账号管理页：`/accounts`
 - 运行时状态：`/api/runtime-status`
+
+## 常用命令
+
+```bash
+npm run build
+npm run pm2:start
+npm run pm2:restart
+npm run pm2:stop
+npm run pm2:logs
+```
 
 ## 日常测试
 
@@ -202,13 +226,9 @@ node dist/index.js --test --filter 1221370654 --force
 
 ## 迁移到 WSL 时的验证顺序
 
-建议按下面顺序验证：
-
 1. WSL 内 `node -v` / `npm -v` / `pm2 -v`
-2. WSL 内访问 Hubstudio Connector
-3. `npm install` / `npm run build`
-4. `ADMIN_HOST=0.0.0.0 npm run pm2:start`
-5. 宿主机打开 `http://localhost:3210/health`
-6. 用 `--test --filter ... --force` 验证少量账号
-7. 验证管理页的“立刻重补今日任务”
-
+2. 执行 `curl -fsSL ... | bash`
+3. 进入 `~/apps/keepalive` 执行 `bash install.sh`
+4. 宿主机打开 `http://localhost:3210/health`
+5. 用 `--test --filter ... --force` 验证少量账号
+6. 验证管理页的“立刻重补今日任务”
