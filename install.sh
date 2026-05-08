@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# ========== Colors ==========
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -13,19 +12,35 @@ ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 fail()  { echo -e "${RED}[FAIL]${NC} $1"; exit 1; }
 
-# ========== Detect package manager ==========
+REPO_URL="https://github.com/timshuang/Keep-Alive.git"
+DEFAULT_DIR="$HOME/apps/keepalive"
+NODE_MAJOR_REQUIRED=22
+
 detect_pkg_manager() {
-  if command -v apt &>/dev/null; then
+  if command -v apt >/dev/null 2>&1; then
     echo "apt"
-  elif command -v dnf &>/dev/null; then
+  elif command -v dnf >/dev/null 2>&1; then
     echo "dnf"
-  elif command -v yum &>/dev/null; then
+  elif command -v yum >/dev/null 2>&1; then
     echo "yum"
-  elif command -v pacman &>/dev/null; then
+  elif command -v pacman >/dev/null 2>&1; then
     echo "pacman"
   else
     echo "unknown"
   fi
+}
+
+is_wsl() {
+  grep -qi microsoft /proc/version 2>/dev/null
+}
+
+ensure_not_mnt_dir() {
+  local dir="$1"
+  case "$dir" in
+    /mnt/*)
+      fail "WSL 正式部署目录不能放在 /mnt 下。请改用类似 ${DEFAULT_DIR} 的 WSL 原生目录。"
+      ;;
+  esac
 }
 
 pkg_install() {
@@ -33,7 +48,8 @@ pkg_install() {
   shift
   case "$pkg_mgr" in
     apt)
-      sudo apt update -qq && sudo apt install -y "$@"
+      sudo apt update -qq
+      sudo apt install -y "$@"
       ;;
     dnf)
       sudo dnf install -y "$@"
@@ -45,235 +61,254 @@ pkg_install() {
       sudo pacman -S --noconfirm "$@"
       ;;
     *)
-      fail "无法自动安装 $*，请手动安装后重新运行脚本"
+      fail "无法自动安装依赖: $*。请手动安装后重试。"
       ;;
   esac
 }
 
-# ========== Step 1: Clone or detect project ==========
-PROJECT_DIR=""
-REPO_URL="https://github.com/timshuang/Keep-Alive.git"
+install_node_22() {
+  local pkg_mgr="$1"
+  info "开始安装或升级 Node.js ${NODE_MAJOR_REQUIRED}.x ..."
 
-if [ -f "package.json" ] && grep -q '"keepalive"' package.json 2>/dev/null; then
-  PROJECT_DIR="$(pwd)"
-  ok "已在项目目录: ${PROJECT_DIR}"
-else
-  PROJECT_DIR="$(pwd)/Keepalive"
-  if [ -d "${PROJECT_DIR}" ]; then
-    ok "项目目录已存在: ${PROJECT_DIR}"
-  else
-    info "正在克隆仓库..."
-    if command -v git &>/dev/null; then
-      git clone "${REPO_URL}" "${PROJECT_DIR}" || fail "git clone 失败"
-      ok "仓库克隆完成"
-    else
-      PKG_MGR=$(detect_pkg_manager)
-      info "git 未安装，正在自动安装..."
-      pkg_install "$PKG_MGR" git
-      git clone "${REPO_URL}" "${PROJECT_DIR}" || fail "git clone 失败"
-      ok "仓库克隆完成"
-    fi
-  fi
-fi
-
-cd "${PROJECT_DIR}"
-
-# ========== Step 2: System dependency check ==========
-info "正在检查系统依赖..."
-
-PKG_MGR=$(detect_pkg_manager)
-
-check_and_install() {
-  local cmd="$1"
-  local pkg_name="$2"
-  if command -v "$cmd" &>/dev/null; then
-    ok "${cmd} 已安装"
-  else
-    warn "${cmd} 未安装，正在自动安装..."
-    pkg_install "$PKG_MGR" "$pkg_name"
-    ok "${cmd} 安装完成"
-  fi
-}
-
-check_and_install git git
-check_and_install tmux tmux
-
-# Node.js special handling: need >= 18
-if command -v node &>/dev/null; then
-  NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [ "$NODE_VERSION" -ge 18 ]; then
-    ok "Node.js $(node -v) 已安装"
-  else
-    warn "Node.js $(node -v) 版本过低（需要 >= 18），正在升级..."
-    case "$PKG_MGR" in
-      apt)
-        # Try nodesource for newer Node.js
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - 2>/dev/null && sudo apt install -y nodejs || fail "Node.js 升级失败，请手动安装 Node.js >= 18"
-        ;;
-      dnf)
-        sudo dnf install -y nodejs || fail "Node.js 升级失败"
-        ;;
-      yum)
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - 2>/dev/null && sudo yum install -y nodejs || fail "Node.js 升级失败"
-        ;;
-      pacman)
-        sudo pacman -S --noconfirm nodejs npm || fail "Node.js 升级失败"
-        ;;
-      *)
-        fail "无法自动升级 Node.js，请手动安装 Node.js >= 18"
-        ;;
-    esac
-    ok "Node.js $(node -v) 安装完成"
-  fi
-else
-  warn "Node.js 未安装，正在自动安装..."
-  case "$PKG_MGR" in
+  case "$pkg_mgr" in
     apt)
-      curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - 2>/dev/null && sudo apt install -y nodejs || fail "Node.js 安装失败，请手动安装 Node.js >= 18"
+      pkg_install "$pkg_mgr" ca-certificates curl gnupg
+      curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR_REQUIRED}.x" | sudo -E bash -
+      sudo apt install -y nodejs
       ;;
     dnf)
-      sudo dnf install -y nodejs || fail "Node.js 安装失败"
+      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR_REQUIRED}.x" | sudo bash -
+      sudo dnf install -y nodejs
       ;;
     yum)
-      curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - 2>/dev/null && sudo yum install -y nodejs || fail "Node.js 安装失败"
+      curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR_REQUIRED}.x" | sudo bash -
+      sudo yum install -y nodejs
       ;;
     pacman)
-      sudo pacman -S --noconfirm nodejs npm || fail "Node.js 安装失败"
+      sudo pacman -S --noconfirm nodejs npm
       ;;
     *)
-      fail "无法自动安装 Node.js，请手动安装 Node.js >= 18 后重新运行脚本"
+      fail "无法自动安装 Node.js ${NODE_MAJOR_REQUIRED}.x，请手动安装后重试。"
       ;;
   esac
-  ok "Node.js $(node -v) 安装完成"
-fi
+}
 
-if command -v npm &>/dev/null; then
-  ok "npm 已安装"
-else
-  warn "npm 未安装，正在安装..."
-  pkg_install "$PKG_MGR" npm
-  ok "npm 安装完成"
-fi
-
-# ========== Step 3: npm install & build ==========
-info "正在安装依赖..."
-npm install || fail "npm install 失败"
-ok "依赖安装完成"
-
-info "正在编译项目..."
-npm run build || fail "npm run build 失败"
-ok "编译完成"
-
-# ========== Step 4: Interactive .env configuration ==========
-if [ -f .env ]; then
-  ok ".env 已存在，跳过配置"
-else
-  info "开始配置 .env 文件（必填项需输入，可选项直接回车跳过）"
-  echo ""
-
-  read -p "请输入 TG_BOT_TOKEN（必填，从 @BotFather 获取）: " TG_BOT_TOKEN
-  while [ -z "$TG_BOT_TOKEN" ]; do
-    warn "TG_BOT_TOKEN 不能为空"
-    read -p "请输入 TG_BOT_TOKEN: " TG_BOT_TOKEN
-  done
-
-  read -p "请输入 TG_CHAT_ID（必填，接收通知的 Chat ID）: " TG_CHAT_ID
-  while [ -z "$TG_CHAT_ID" ]; do
-    warn "TG_CHAT_ID 不能为空"
-    read -p "请输入 TG_CHAT_ID: " TG_CHAT_ID
-  done
-
-  read -p "请输入 TG_API_PROXY（可选，如 http://127.0.0.1:7890，回车跳过）: " TG_API_PROXY
-
-  cat > .env <<EOF
-# Telegram Bot（必填）
-TG_BOT_TOKEN=${TG_BOT_TOKEN}
-TG_CHAT_ID=${TG_CHAT_ID}
-TG_API_PROXY=${TG_API_PROXY}
-
-# Resend 邮件（可选，配置后启用邮件告警）
-# RESEND_API_KEY=
-# ALERT_EMAIL=
-EOF
-
-  ok ".env 配置完成"
-fi
-
-# ========== Step 5: accounts.json ==========
-if [ -f accounts.json ]; then
-  ok "accounts.json 已存在，跳过"
-else
-  cp accounts.json.example accounts.json
-  warn "已从 accounts.json.example 创建 accounts.json"
-  warn "请编辑 accounts.json 填入你的账号信息后重新运行！"
-  echo ""
-  echo -e "  编辑命令: ${CYAN}nano ${PROJECT_DIR}/accounts.json${NC}"
-  echo ""
-  read -p "是否现在编辑 accounts.json？[Y/n] " EDIT_NOW
-  if [[ "$EDIT_NOW" =~ ^[Nn] ]]; then
-    warn "请稍后手动编辑 accounts.json，完成后重新运行安装脚本"
-    exit 0
+ensure_git() {
+  local pkg_mgr="$1"
+  if command -v git >/dev/null 2>&1; then
+    ok "git 已满足，跳过安装"
+    return
   fi
-  ${EDITOR:-nano} accounts.json
-  ok "accounts.json 编辑完成"
-fi
+  warn "git 未安装，开始安装..."
+  pkg_install "$pkg_mgr" git
+  ok "git 已安装"
+}
 
-# ========== Step 6: Fix permissions ==========
-info "正在修复文件权限..."
+ensure_curl() {
+  local pkg_mgr="$1"
+  if command -v curl >/dev/null 2>&1; then
+    ok "curl 已满足，跳过安装"
+    return
+  fi
+  warn "curl 未安装，开始安装..."
+  pkg_install "$pkg_mgr" curl
+  ok "curl 已安装"
+}
 
-CURRENT_USER="$(whoami)"
-mkdir -p logs
-
-# Ensure current user owns everything
-if [ "$(id -u)" -eq 0 ]; then
-  # Running as root, chown to SUDO_USER if available
-  TARGET_USER="${SUDO_USER:-$CURRENT_USER}"
-  chown -R "$TARGET_USER":"$TARGET_USER" . 2>/dev/null || true
-  warn "以 root 运行，已将文件所有者改为 ${TARGET_USER}"
-else
-  # Running as normal user, just ensure writable
-  chmod -R u+rw . 2>/dev/null || true
-fi
-
-ok "文件权限修复完成"
-
-# ========== Step 7: Start with tmux ==========
-SESSION_NAME="keepalive"
-
-if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-  warn "tmux session '${SESSION_NAME}' 已存在"
-  read -p "是否重启？[Y/n] " RESTART_NOW
-  if [[ ! "$RESTART_NOW" =~ ^[Nn] ]]; then
-    tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
-    sleep 1
+ensure_node_and_npm() {
+  local pkg_mgr="$1"
+  if command -v node >/dev/null 2>&1; then
+    local current_major
+    current_major="$(node -v | sed 's/^v//' | cut -d. -f1)"
+    if [ "$current_major" = "$NODE_MAJOR_REQUIRED" ]; then
+      ok "Node.js $(node -v) 已满足要求，跳过安装"
+    else
+      warn "当前 Node.js 版本为 $(node -v)，需要 ${NODE_MAJOR_REQUIRED}.x，开始升级..."
+      install_node_22 "$pkg_mgr"
+      ok "Node.js 已升级到 $(node -v)"
+    fi
   else
-    ok "保持现有 session 运行"
-    echo ""
-    echo -e "  查看日志: ${CYAN}tmux attach -t ${SESSION_NAME}${NC}"
-    exit 0
+    warn "Node.js 未安装，开始安装 ${NODE_MAJOR_REQUIRED}.x ..."
+    install_node_22 "$pkg_mgr"
+    ok "Node.js 已安装为 $(node -v)"
   fi
-fi
 
-if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
-  su - "$SUDO_USER" -c "cd '${PROJECT_DIR}' && tmux new-session -d -s '${SESSION_NAME}' 'node dist/index.js 2>&1 | tee -a logs/console.log'"
-else
-  tmux new-session -d -s "$SESSION_NAME" "cd '${PROJECT_DIR}' && node dist/index.js 2>&1 | tee -a logs/console.log"
-fi
+  if command -v npm >/dev/null 2>&1; then
+    ok "npm $(npm -v) 已满足，跳过安装"
+  else
+    warn "npm 未安装，开始补装..."
+    install_node_22 "$pkg_mgr"
+    ok "npm 已安装为 $(npm -v)"
+  fi
+}
 
-ok "Keepalive 已在 tmux session '${SESSION_NAME}' 中启动"
+ensure_pm2() {
+  if command -v pm2 >/dev/null 2>&1; then
+    ok "pm2 $(pm2 -v) 已满足，跳过安装"
+    return
+  fi
+  warn "pm2 未安装，开始全局安装..."
+  sudo npm install -g pm2
+  ok "pm2 已安装为 $(pm2 -v)"
+}
 
-# ========== Done ==========
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  Keepalive 安装完成！${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo -e "  查看日志:   ${CYAN}tmux attach -t ${SESSION_NAME}${NC}"
-echo -e "  退出日志:   ${CYAN}Ctrl+B 然后按 D${NC}"
-echo -e "  停止程序:   ${CYAN}tmux kill-session -t ${SESSION_NAME}${NC}"
-echo -e "  重启程序:   ${CYAN}cd ${PROJECT_DIR} && tmux new-session -d -s ${SESSION_NAME} 'node dist/index.js 2>&1 | tee -a logs/console.log'${NC}"
-echo ""
-echo -e "  项目目录:   ${CYAN}${PROJECT_DIR}${NC}"
-echo -e "  配置文件:   ${CYAN}${PROJECT_DIR}/.env${NC}"
-echo -e "  账号文件:   ${CYAN}${PROJECT_DIR}/accounts.json${NC}"
-echo ""
+resolve_project_dir() {
+  if [ -f "package.json" ] && grep -q '"keepalive"' package.json 2>/dev/null; then
+    pwd
+    return
+  fi
+
+  local dir="$DEFAULT_DIR"
+  mkdir -p "$(dirname "$dir")"
+
+  if [ -d "$dir/.git" ]; then
+    echo "$dir"
+    return
+  fi
+
+  git clone "$REPO_URL" "$dir"
+  echo "$dir"
+}
+
+ensure_env_file() {
+  if [ -f .env ]; then
+    ok ".env 已存在，跳过初始化"
+    return
+  fi
+
+  if [ -f .env.example ]; then
+    cp .env.example .env
+    warn "已根据 .env.example 创建 .env，请补充 TG_BOT_TOKEN / TG_CHAT_ID 等配置后再启动。"
+  else
+    cat > .env <<'EOF'
+TG_BOT_TOKEN=
+TG_CHAT_ID=
+TG_API_PROXY=
+RESEND_API_KEY=
+ALERT_EMAIL=
+EOF
+    warn "已创建空白 .env，请补充配置后再启动。"
+  fi
+}
+
+ensure_accounts_file() {
+  if [ -f accounts.json ]; then
+    ok "accounts.json 已存在，跳过初始化"
+    return
+  fi
+
+  if [ -f accounts.json.example ]; then
+    cp accounts.json.example accounts.json
+    warn "已根据 accounts.json.example 创建 accounts.json，请填入账号信息。"
+  else
+    fail "缺少 accounts.json.example，无法初始化 accounts.json。"
+  fi
+}
+
+resolve_wsl_host_ip() {
+  awk '/^nameserver / { print $2; exit }' /etc/resolv.conf 2>/dev/null || true
+}
+
+resolve_hub_host() {
+  if [ ! -f config.jsonc ]; then
+    echo "127.0.0.1"
+    return
+  fi
+
+  local configured
+  configured="$(sed -n 's/.*"host"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' config.jsonc | head -n 1)"
+  if [ -z "$configured" ]; then
+    configured="127.0.0.1"
+  fi
+
+  if [ "$configured" = "127.0.0.1" ] && is_wsl; then
+    local wsl_host_ip
+    wsl_host_ip="$(resolve_wsl_host_ip)"
+    if [ -n "$wsl_host_ip" ]; then
+      echo "$wsl_host_ip"
+      return
+    fi
+  fi
+
+  echo "$configured"
+}
+
+check_hub_connectivity() {
+  local hub_host="$1"
+  local hub_port="$2"
+
+  info "开始预检 Hubstudio Connector: http://${hub_host}:${hub_port}"
+  if curl -fsS --max-time 5 \
+    -H "Content-Type: application/json" \
+    -d '{"current":1,"size":1}' \
+    "http://${hub_host}:${hub_port}/api/v1/env/list" >/dev/null; then
+    ok "Hubstudio Connector 连通性预检通过"
+  else
+    warn "Hubstudio Connector 连通性预检失败"
+    warn "如果当前在 WSL 中运行，请确认宿主机 Windows 上的 Hubstudio Connector 已启动并允许从 WSL 访问。"
+    warn "如自动探测地址不可用，请在 config.jsonc 中将 hub.host 改为宿主机实际可达 IP 后重试。"
+  fi
+}
+
+print_next_steps() {
+  local project_dir="$1"
+  local hub_host="$2"
+
+  echo
+  echo -e "${GREEN}========================================${NC}"
+  echo -e "${GREEN}  Keepalive WSL 部署准备完成${NC}"
+  echo -e "${GREEN}========================================${NC}"
+  echo
+  echo -e "项目目录:      ${CYAN}${project_dir}${NC}"
+  echo -e ".env 文件:     ${CYAN}${project_dir}/.env${NC}"
+  echo -e "账号文件:      ${CYAN}${project_dir}/accounts.json${NC}"
+  echo -e "Hub 访问地址:  ${CYAN}${hub_host}:6873${NC}"
+  echo
+  echo -e "启动命令:"
+  echo -e "  ${CYAN}cd ${project_dir} && npm install && npm run build && ADMIN_HOST=0.0.0.0 npm run pm2:start${NC}"
+  echo
+  echo -e "常用命令:"
+  echo -e "  ${CYAN}npm run pm2:restart${NC}"
+  echo -e "  ${CYAN}npm run pm2:logs${NC}"
+  echo
+  echo -e "宿主机访问管理页:"
+  echo -e "  ${CYAN}http://localhost:3210/health${NC}"
+  echo -e "  若 localhost 转发不可用，再改用 WSL IP 访问。"
+  echo
+}
+
+main() {
+  local pkg_mgr
+  pkg_mgr="$(detect_pkg_manager)"
+  [ "$pkg_mgr" != "unknown" ] || fail "无法识别包管理器，请手动安装依赖。"
+
+  if is_wsl; then
+    ok "已检测到 WSL 环境"
+  else
+    warn "当前未检测到 WSL。该脚本仍可运行，但正式部署推荐在 WSL 中执行。"
+  fi
+
+  local project_dir
+  project_dir="$(resolve_project_dir)"
+  ensure_not_mnt_dir "$project_dir"
+  cd "$project_dir"
+  ok "部署目录: $project_dir"
+
+  info "开始环境预检..."
+  ensure_git "$pkg_mgr"
+  ensure_curl "$pkg_mgr"
+  ensure_node_and_npm "$pkg_mgr"
+  ensure_pm2
+
+  info "开始初始化项目文件..."
+  ensure_env_file
+  ensure_accounts_file
+
+  local hub_host
+  hub_host="$(resolve_hub_host)"
+  check_hub_connectivity "$hub_host" "6873"
+
+  print_next_steps "$project_dir" "$hub_host"
+}
+
+main "$@"

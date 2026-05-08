@@ -1,279 +1,214 @@
 # Keepalive
 
-对"撸毛三件套"（Twitter、Discord、Gmail）账号进行自动保活，防止长期不活跃被平台要求手机验证。通过 Hubstudio 指纹浏览器的 CDP 协议连接已打开的 profile，新建标签页访问平台 → 等待加载 → 检测是否被锁 → 关闭新标签页。
+通过 Hubstudio 指纹浏览器的 CDP 能力，对 Twitter、Discord、Gmail 等账号执行轻量保活，降低长期不活跃带来的风控和二次验证风险。
 
----
+当前正式运行模型：
 
-## 常用命令
+- 单服务 `keepalive`
+- 单进程内同时承载保活主循环和本地管理页
+- 使用 PM2 托管
+- 管理页默认监听 `3210`
 
-### 开发测试
+## 推荐部署
 
-开发机性能有限，只需挑几个环境测试保活功能：
+当前推荐正式部署在：
 
-```bash
-# 指定账号 + 跳过随机延迟 + 强制执行（忽略到期判断和异常状态）
-node dist/index.js --test --filter 001,002 --force
+- `WSL` 中运行 `keepalive`
+- `Windows 宿主机` 继续运行 `Hubstudio + 指纹环境 + Connector`
 
-# 按范围筛选
-node dist/index.js --test --filter 001-005 --force
+这样可以把 Node 服务放在 WSL 中统一管理，同时继续使用宿主机 Windows 的图形化指纹环境。
 
-# 按 containerCode 筛选
-node dist/index.js --test --filter 1221370654 --force
+## WSL 部署原则
 
-# 只筛选不强制（只跑到期账号）
-node dist/index.js --test --filter 001,002
-```
+### 1. 部署目录
 
-### 重置系统状态
-
-状态混乱时一键重置，删除 `state.json` 后下次启动等同于首次运行：
+正式部署目录应放在 WSL 原生 Linux 文件系统中，例如：
 
 ```bash
-node dist/index.js --reset
+~/apps/keepalive
 ```
 
-### 正式运行
+不要放在：
 
 ```bash
-# 编译
-npx tsc
-
-# 正式运行（全量 48 个账号，含随机延迟）
-node dist/index.js
+/mnt/c/...
 ```
 
-### CLI 参数说明
+原因：
 
-| 参数 | 说明 |
-|------|------|
-| `--test` | 跳过随机启动延迟（最长 720 分钟），快速进入保活流程 |
-| `--filter <值>` | 筛选指定账号，支持按 containerName（如 `001`）或 containerCode（如 `1221370654`）匹配，支持逗号分隔和范围语法（如 `001-005`） |
-| `--force` | 强制执行保活，忽略：① 到期判断（不管间隔是否到了）② 今日已跑判断 ③ dailyQueue 缓存 ④ 异常状态（自动重置 `verification_required` / `error` 为 `ok`） |
-| `--reset` | 删除 `state.json`，重置所有运行状态，立即退出。下次启动为全新首次运行 |
+- `/mnt` 挂载目录的 I/O 和权限表现更差
+- PM2、日志和状态文件在原生 WSL 文件系统中更稳定
 
-> **组合使用**：`--test --filter 001,002 --force` 是开发测试最常用的组合，快速对指定账号执行保活，不受任何调度限制。
+### 2. Hubstudio 访问方式
 
----
-
-## Hubstudio API 接口说明
-
-所有接口通过本地 Connector 提供，基础地址格式：`http://127.0.0.1:{HUB_CONNECTOR_PORT}`（默认 6873）。
-
-### 1. 获取环境列表
-
-```
-POST /api/v1/env/list
-```
-
-**请求参数：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| current | number | 页码，从 1 开始 |
-| size | number | 每页数量，建议 200 |
-
-**请求示例：**
-
-```json
-{ "current": 1, "size": 200 }
-```
-
-**响应结构：**
+`config.jsonc` 中默认仍可写：
 
 ```json
 {
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "total": 48,
-    "list": [
-      {
-        "containerCode": 12345,
-        "containerName": "001-日常",
-        "proxyTypeName": "socks5",
-        "proxyHost": "127.0.0.1",
-        "proxyPort": 1080,
-        "lastUsedIp": "1.2.3.4",
-        "lastCountry": "US",
-        "ua": "Mozilla/5.0 ...",
-        "...": "其他字段省略"
-      }
-    ]
+  "hub": {
+    "host": "127.0.0.1",
+    "port": 6873
   }
 }
 ```
 
-> **必须用 POST + `Content-Type: application/json` + JSON body**，用 GET 会返回空列表。
+当程序运行在 WSL 中时，[src/config.ts](/F:/Projects2026/codex/Keepalive/src/config.ts) 会自动：
 
----
+- 检测当前是否为 WSL
+- 从 `/etc/resolv.conf` 读取 Windows 宿主机 IP
+- 将 `127.0.0.1` 替换为宿主机可访问 IP
 
-### 2. 启动环境
+如果目标 WSL 网络模式下自动探测失效，再将 `hub.host` 手动改成宿主机实际可达 IP。
 
-```
-POST /api/v1/browser/start
-```
+### 3. 管理页访问方式
 
-**请求参数：**
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| containerCode | string | 是 | 环境编码 |
-| isHeadless | boolean | 否 | 是否无头模式 |
-| args | string[] | 否 | 额外浏览器启动参数 |
-
-**请求示例：**
-
-```json
-{ "containerCode": "abc123" }
-```
-
-**响应结构：**
-
-```json
-{
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "debuggingPort": 9222,
-    "action": "start",
-    "statusCode": 0,
-    "...": "其他字段省略"
-  }
-}
-```
-
-**关键行为：**
-
-- 环境未开 → 启动并返回 `debuggingPort`
-- 环境已开 → 需要客服开通权限后，也能返回 `debuggingPort`（见下方说明）
-- 环境已开且无权限 → 返回错误码 `-10013`（`ENV_ALREADY_RUNNING`）
-
----
-
-### 3. 停止环境
-
-```
-POST /api/v1/browser/stop
-```
-
-**请求参数：**
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| containerCode | string | 是 | 环境编码 |
-
-**请求示例：**
-
-```json
-{ "containerCode": "abc123" }
-```
-
-**响应结构：**
-
-```json
-{
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "action": "stop",
-    "statusCode": 0
-  }
-}
-```
-
-> 本项目**不会主动调用此接口**停止环境，保活完成后只关闭新建标签页，不关指纹浏览器。
-
----
-
-### 4. 查询所有环境状态
-
-```
-POST /api/v1/browser/all-browser-status
-```
-
-**请求参数：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| containerCodes | string[] | 要查询的环境编码列表，传空数组查询全部 |
-
-**请求示例：**
-
-```json
-{ "containerCodes": [] }
-```
-
-**响应结构：**
-
-```json
-{
-  "code": 0,
-  "msg": "success",
-  "data": {
-    "containers": [
-      { "containerCode": "abc123", "status": 0 },
-      { "containerCode": "def456", "status": 3 }
-    ]
-  }
-}
-```
-
-**status 取值：**
-
-| 值 | 含义 |
-|----|------|
-| 0 | 已开启 |
-| 1 | 开启中 |
-| 2 | 关闭中 |
-| 3 | 已关闭 |
-
-> 传空 `containerCodes` 可一次性获取所有环境状态，用于预检批量判断哪些环境已开，无需逐个查询。
-
----
-
-## 重要说明
-
-### 已开环境调用 browser/start 需要开通权限
-
-默认情况下，环境已开启时再次调用 `browser/start` 会返回错误码 `-10013`（`ENV_ALREADY_RUNNING`），**无法获取 `debuggingPort`**。
-
-如果需要在环境已开的情况下获取 `debuggingPort`（本项目的核心需求），**必须联系 Hubstudio 客服开通此权限**。开通后，已开环境调用 `browser/start` 也会正常返回 `debuggingPort`。
-
-### API 与客户端同时运行需 V3.35.0 及以上
-
-如需 API 与 Hubstudio 客户端同时运行使用，**客户端版本需 ≥ V3.35.0**。低于此版本的客户端无法在打开 GUI 的同时通过 API 操作环境。
-
----
-
-## 踩坑记录
-
-| 问题 | 说明 |
-|------|------|
-| `env/list` 用 GET 返回空 | 必须用 POST + `Content-Type: application/json` + body `{"current":1,"size":200}` |
-| containerCode 以 API 返回为准 | YAML 配置或手动记录的 containerCode 可能过时，以 `/api/v1/env/list` 返回为准 |
-| 已开环境再调 start 的行为 | 未开通权限 → 报错 `-10013`；开通权限 → 正常返回 `debuggingPort` |
-| Node.js 比 curl 更适合调 API | Windows PowerShell 下 curl 的 JSON 转义容易出错，Node.js `fetch`/`http` 模块更可靠 |
----
-
-## PM2
+WSL 中建议用：
 
 ```bash
-# build dist/
+ADMIN_HOST=0.0.0.0
+```
+
+这样 Windows 宿主机优先可通过：
+
+```bash
+http://localhost:3210
+```
+
+访问管理页；若宿主机到 WSL 的 localhost 转发不可用，再改用 WSL IP。
+
+## 环境预检要求
+
+WSL 正式部署前必须先检查：
+
+- `node`
+- `npm`
+- `pm2`
+
+处理规则：
+
+- `node` 不存在：安装 `Node.js 22.x`
+- `node` 已存在但主版本不是 `22`：升级到 `22.x`
+- `npm` 缺失：补装
+- `pm2` 缺失：全局安装
+- 已满足要求：跳过，不重复安装
+
+仓库内的 [install.sh](/F:/Projects2026/codex/Keepalive/install.sh) 已按这套规则更新。
+
+## 快速安装
+
+在 WSL 中执行：
+
+```bash
+bash install.sh
+```
+
+脚本会：
+
+- 检查并安装 `git`、`curl`
+- 预检 `node` / `npm` / `pm2`
+- 将 Node.js 安装或升级到 `22.x`
+- 初始化 `.env` 与 `accounts.json`
+- 预检 WSL 到宿主机 Hubstudio Connector 的连通性
+
+## 正式启动
+
+### 1. 安装依赖并构建
+
+```bash
+npm install
 npm run build
+```
 
-# start both keepalive-main and keepalive-admin
-npm run pm2:start
+### 2. 用 PM2 启动
 
-# restart both apps
+```bash
+ADMIN_HOST=0.0.0.0 npm run pm2:start
+```
+
+常用命令：
+
+```bash
 npm run pm2:restart
-
-# stop both apps
 npm run pm2:stop
-
-# inspect recent logs
 npm run pm2:logs
 ```
 
-- `keepalive-admin` keeps listening on `127.0.0.1:3210`
-- Health check: `http://127.0.0.1:3210/health`
-- The project-level pm2 runner first tries `pm2` from `PATH`, then falls back to the current npm global prefix, which makes Windows and WSL migration easier.
+### 3. 健康检查
+
+```bash
+http://localhost:3210/health
+```
+
+## 管理页
+
+管理页用于：
+
+- 管理本地账号配置和保活渠道
+- 查看运行时状态
+- 手动执行“立刻重补今日任务”
+
+常用地址：
+
+- 健康检查：`/health`
+- 账号管理页：`/accounts`
+- 运行时状态：`/api/runtime-status`
+
+## 日常测试
+
+开发或迁移验证时，建议先用少量账号测试：
+
+```bash
+node dist/index.js --test --filter 001,002 --force
+```
+
+也可以按范围：
+
+```bash
+node dist/index.js --test --filter 001-005 --force
+```
+
+或按 `containerCode`：
+
+```bash
+node dist/index.js --test --filter 1221370654 --force
+```
+
+## CLI 参数
+
+| 参数 | 说明 |
+|------|------|
+| `--test` | 跳过每日随机启动延迟，立即进入当次执行流程 |
+| `--filter <value>` | 仅执行指定账号，支持 `001,002`、`001-005`、`containerCode` |
+| `--force` | 忽略到期判断、今日已执行判断和异常状态限制 |
+| `--reset` | 删除 `state.json` 并重置运行状态后退出 |
+
+## Hubstudio 关键前提
+
+### 1. 已开启环境再次调用 `browser/start`
+
+如果要在“环境已打开”的情况下仍然拿到 `debuggingPort`，需要 Hubstudio 侧已开通对应权限。否则可能返回：
+
+```text
+-10013
+```
+
+### 2. 客户端版本
+
+如果需要 GUI 客户端与 API 同时工作，Hubstudio 客户端版本需满足：
+
+```text
+>= V3.35.0
+```
+
+## 迁移到 WSL 时的验证顺序
+
+建议按下面顺序验证：
+
+1. WSL 内 `node -v` / `npm -v` / `pm2 -v`
+2. WSL 内访问 Hubstudio Connector
+3. `npm install` / `npm run build`
+4. `ADMIN_HOST=0.0.0.0 npm run pm2:start`
+5. 宿主机打开 `http://localhost:3210/health`
+6. 用 `--test --filter ... --force` 验证少量账号
+7. 验证管理页的“立刻重补今日任务”
+
