@@ -200,6 +200,11 @@ export function renderAdminPage(): string {
         text-align: left;
       }
 
+      tbody td {
+        padding-top: 12px;
+        padding-bottom: 12px;
+      }
+
       td.center-cell,
       td.actions-cell {
         text-align: center;
@@ -218,67 +223,105 @@ export function renderAdminPage(): string {
       }
 
       .platforms {
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
-        min-width: 260px;
+        min-width: 480px;
       }
 
       .platform-card {
         border: 1px solid rgba(148, 163, 184, 0.26);
-        border-radius: 18px;
+        border-radius: 16px;
         background: rgba(255, 255, 255, 0.9);
-        padding: 12px 14px;
+        padding: 10px 12px;
         text-align: left;
+        min-height: auto;
+        position: relative;
       }
 
       .platform-card.paused {
+        grid-column: 1 / -1;
         text-align: center;
         color: var(--muted);
         background: rgba(248, 250, 252, 0.9);
+        min-height: auto;
       }
 
       .platform-head {
         display: flex;
         justify-content: space-between;
-        gap: 12px;
-        align-items: center;
+        align-items: flex-start;
+        gap: 8px;
+        padding-right: 96px;
+      }
+
+      .platform-head-main {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+
+      .platform-head-side {
+        display: inline-flex;
+        align-items: flex-start;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-wrap: wrap;
       }
 
       .platform-name {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 800;
         color: #7c2d12;
+        line-height: 1.2;
       }
 
       .platform-meta {
-        margin-top: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        font-size: 12px;
-        line-height: 1.5;
-        color: var(--muted);
+        margin-top: 6px;
+      }
+
+      .platform-meta:empty {
+        display: none;
       }
 
       .platform-reason {
+        display: block;
+        font-size: 12px;
+        line-height: 1.4;
         color: var(--danger);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .platform-actions {
-        margin-top: 10px;
+        position: absolute;
+        top: 10px;
+        right: 12px;
         display: flex;
         justify-content: flex-end;
+        margin-top: 0;
       }
 
       .status-chip {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 6px 10px;
+        padding: 5px 9px;
         border-radius: 999px;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .platform-reset-btn {
+        padding: 5px 9px;
+        font-size: 11px;
+        line-height: 1.2;
+        white-space: nowrap;
       }
 
       .status-chip.ok {
@@ -534,7 +577,11 @@ export function renderAdminPage(): string {
         <div>
           <p class="eyebrow">Keepalive Admin</p>
           <h1>账号管理</h1>
-          <p class="subtitle">管理本地账号配置、查看各保活渠道当前状态，并在误判或人工处理后重置单个渠道的异常状态。</p>
+          <p class="subtitle">
+            1.管理本地账号配置、人工介入重补当日任务。
+            <br />
+            2.查看各保活渠道当前状态，重置单个渠道的异常状态。
+          </p>
         </div>
         <div class="actions">
           <button id="refreshBtn" class="secondary" type="button">刷新列表</button>
@@ -686,6 +733,8 @@ export function renderAdminPage(): string {
           phase: 'starting',
           canRecover: false,
           recoveryInProgress: false,
+          countdownSeconds: null,
+          expectedStartAt: null,
           message: '服务启动中...',
         },
         runtimePollTimer: null,
@@ -831,6 +880,37 @@ export function renderAdminPage(): string {
         });
       }
 
+      function formatCountdownDuration(totalSeconds) {
+        if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+          return '0 秒';
+        }
+
+        const seconds = Math.floor(totalSeconds);
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const remainingSeconds = seconds % 60;
+
+        if (hours > 0) {
+          return hours + ' 小时 ' + minutes + ' 分钟 ' + remainingSeconds + ' 秒';
+        }
+
+        if (minutes > 0) {
+          return minutes + ' 分钟 ' + remainingSeconds + ' 秒';
+        }
+
+        return remainingSeconds + ' 秒';
+      }
+
+      function buildPlatformTooltip(platformState) {
+        const parts = [];
+        parts.push('状态: ' + getStatusLabel(platformState.status));
+        parts.push('最近执行: ' + formatDateTime(platformState.lastRun));
+        if (platformState.alertDetail) {
+          parts.push('异常原因: ' + platformState.alertDetail);
+        }
+        return parts.join(' | ');
+      }
+
       function getRuntimeStatusMessage(runtime) {
         if (
           runtime &&
@@ -840,7 +920,7 @@ export function renderAdminPage(): string {
         ) {
           const expectedTime = formatTimeOnly(runtime.expectedStartAt);
           if (expectedTime) {
-            return '距离开始还有 ' + runtime.countdownSeconds + ' 秒，预计 ' + expectedTime + ' 开始';
+            return '距离开始还有 ' + formatCountdownDuration(runtime.countdownSeconds) + '，预计 ' + expectedTime + ' 开始';
           }
         }
 
@@ -993,21 +1073,25 @@ export function renderAdminPage(): string {
             lastRun: null,
           };
           const isAbnormal = platformState.status !== 'ok';
-          const reason = platformState.alertDetail ? '<div class="platform-reason">异常原因: ' + escapeHtml(platformState.alertDetail) + '</div>' : '';
+          const tooltip = buildPlatformTooltip(platformState);
+          const reason = platformState.alertDetail
+            ? '<div class="platform-meta"><span class="platform-reason" title="' + escapeHtml(platformState.alertDetail) + '">异常原因: ' + escapeHtml(platformState.alertDetail) + '</span></div>'
+            : '';
           const resetButton = isAbnormal
-            ? '<div class="platform-actions"><button class="danger-btn" type="button" data-action="reset" data-code="' + escapeHtml(account.containerCode) + '" data-platform="' + escapeHtml(platform) + '">重置异常</button></div>'
+            ? '<div class="platform-actions"><button class="danger-btn platform-reset-btn" type="button" data-action="reset" data-code="' + escapeHtml(account.containerCode) + '" data-platform="' + escapeHtml(platform) + '">重置异常</button></div>'
             : '';
 
-          return '<div class="platform-card">' +
+          return '<div class="platform-card" title="' + escapeHtml(tooltip) + '">' +
             '<div class="platform-head">' +
-              '<span class="platform-name">' + escapeHtml(getPlatformLabel(platform)) + '</span>' +
-              '<span class="status-chip ' + escapeHtml(platformState.status) + '">' + escapeHtml(getStatusLabel(platformState.status)) + '</span>' +
+              '<div class="platform-head-main">' +
+                '<span class="platform-name">' + escapeHtml(getPlatformLabel(platform)) + '</span>' +
+                '<span class="status-chip ' + escapeHtml(platformState.status) + '">' + escapeHtml(getStatusLabel(platformState.status)) + '</span>' +
+              '</div>' +
+              '<div class="platform-head-side">' +
+                resetButton +
+              '</div>' +
             '</div>' +
-            '<div class="platform-meta">' +
-              '<div>最近执行: ' + escapeHtml(formatDateTime(platformState.lastRun)) + '</div>' +
-              reason +
-            '</div>' +
-            resetButton +
+            reason +
           '</div>';
         }).join('');
       }
