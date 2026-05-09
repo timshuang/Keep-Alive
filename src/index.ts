@@ -49,6 +49,7 @@ interface DailyCycleResult {
 
 interface RuntimeControl {
   setPhase: (phase: RuntimePhase, message: string) => void;
+  setWaitingCountdown: (message: string, expectedStartAt: Date) => void;
   getSnapshot: () => RuntimeStatusPayload;
   registerWaitCanceler: (canceler: (() => void) | null) => void;
   requestManualRecover: () => { success: boolean; message: string };
@@ -62,10 +63,20 @@ function createRuntimeControl(): RuntimeControl {
   let recoveryInProgress = false;
   let manualRecoverRequested = false;
   let waitCanceler: (() => void) | null = null;
+  let expectedStartAtMs: number | null = null;
 
   function setPhase(nextPhase: RuntimePhase, nextMessage: string): void {
     phase = nextPhase;
     message = nextMessage;
+    if (nextPhase !== 'idle_waiting') {
+      expectedStartAtMs = null;
+    }
+  }
+
+  function setWaitingCountdown(nextMessage: string, expectedStartAt: Date): void {
+    phase = 'idle_waiting';
+    message = nextMessage;
+    expectedStartAtMs = expectedStartAt.getTime();
   }
 
   function canRecover(): boolean {
@@ -74,11 +85,18 @@ function createRuntimeControl(): RuntimeControl {
 
   return {
     setPhase,
+    setWaitingCountdown,
     getSnapshot: () => ({
       phase,
       canRecover: canRecover(),
       recoveryInProgress,
       message,
+      countdownSeconds: phase === 'idle_waiting' && expectedStartAtMs !== null
+        ? Math.max(0, Math.ceil((expectedStartAtMs - Date.now()) / 1000))
+        : null,
+      expectedStartAt: phase === 'idle_waiting' && expectedStartAtMs !== null
+        ? new Date(expectedStartAtMs).toISOString()
+        : null,
     }),
     registerWaitCanceler: canceler => {
       waitCanceler = canceler;
@@ -106,6 +124,7 @@ function createRuntimeControl(): RuntimeControl {
 
       manualRecoverRequested = true;
       recoveryInProgress = true;
+      expectedStartAtMs = null;
       message = '已收到手动恢复请求，准备立即预检。';
 
       if (waitCanceler) {
@@ -241,6 +260,12 @@ async function applyDailyStartDelay(
   }
 
   runtimeControl.setPhase('idle_waiting', `今日任务等待随机延迟结束，约 ${delayMinutes} 分钟后开始。`);
+
+  const expectedStartAt = new Date(Date.now() + delaySeconds * 1000);
+  runtimeControl.setWaitingCountdown(
+    `今日任务等待随机延迟结束，距离开始还有 ${delaySeconds} 秒，预计 ${expectedStartAt.toLocaleTimeString('zh-CN', { hour12: false })} 开始。`,
+    expectedStartAt
+  );
 
   for (let remainingSeconds = delaySeconds; remainingSeconds > 0; remainingSeconds -= 60) {
     const remainingMinutes = Math.ceil(remainingSeconds / 60);
@@ -586,6 +611,7 @@ async function main(): Promise<void> {
 
   await startAdminServer({
     hub,
+    state,
     onRestartService: () => {
       logger.info('Admin: restart requested, exiting process for PM2 restart');
       process.exit(0);

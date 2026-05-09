@@ -1,5 +1,6 @@
 import http, { IncomingMessage, Server, ServerResponse } from 'http';
 import {
+  ACCOUNT_PLATFORMS,
   AccountEntry,
   assertAccountMatchesHub,
   assertNoDuplicateAccount,
@@ -12,6 +13,7 @@ import {
 import { renderAdminPage } from './admin-page';
 import { HubClient } from './hub/client';
 import { logger } from './logger';
+import { AppState, getPlatformState, updatePlatformState } from './state';
 
 const DEFAULT_PORT = 3210;
 const DEFAULT_HOST = '127.0.0.1';
@@ -21,14 +23,28 @@ export interface RuntimeStatusPayload {
   canRecover: boolean;
   recoveryInProgress: boolean;
   message: string;
+  countdownSeconds: number | null;
+  expectedStartAt: string | null;
 }
 
 export interface AdminServerOptions {
   hub: HubClient;
+  state: AppState;
   onRestartService?: () => void;
   onRecoverToday?: () => Promise<{ success: boolean; message: string }> | { success: boolean; message: string };
   getRuntimeStatus?: () => RuntimeStatusPayload;
 }
+
+interface AdminAccountPlatformState {
+  status: 'ok' | 'verification_required' | 'error';
+  lastRun: string | null;
+  lastAlert?: string;
+  alertDetail?: string;
+}
+
+type AdminAccountPayload = AccountEntry & {
+  platformStates: Partial<Record<(typeof ACCOUNT_PLATFORMS)[number], AdminAccountPlatformState>>;
+};
 
 function getAdminHost(): string {
   const raw = process.env.ADMIN_HOST?.trim();
@@ -99,13 +115,30 @@ function isClientErrorMessage(message: string): boolean {
     '今日任务已完成',
     '当前正在恢复',
     '服务启动中',
+    '平台参数不合法',
+    '未启用此保活渠道',
+    '当前未启用手动恢复能力',
   ].some(keyword => message.includes(keyword));
+}
+
+function isKnownPlatform(platform: string): platform is (typeof ACCOUNT_PLATFORMS)[number] {
+  return (ACCOUNT_PLATFORMS as readonly string[]).includes(platform);
+}
+
+function buildAdminAccountPayload(accounts: AccountEntry[], state: AppState): AdminAccountPayload[] {
+  return accounts.map(account => ({
+    ...account,
+    platformStates: Object.fromEntries(
+      account.platforms.map(platform => [platform, getPlatformState(state, account.containerCode, platform)])
+    ) as AdminAccountPayload['platformStates'],
+  }));
 }
 
 async function handleApi(
   req: IncomingMessage,
   res: ServerResponse,
   hub: HubClient,
+  state: AppState,
   onRestartService: () => void,
   onRecoverToday: () => Promise<{ success: boolean; message: string }> | { success: boolean; message: string },
   getRuntimeStatus: () => RuntimeStatusPayload
@@ -116,7 +149,7 @@ async function handleApi(
 
   if (method === 'GET' && pathname === '/api/accounts') {
     const accounts = readAccountsOrThrow();
-    sendJson(res, 200, { accounts });
+    sendJson(res, 200, { accounts: buildAdminAccountPayload(accounts, state) });
     return true;
   }
 
@@ -157,6 +190,7 @@ async function handleApi(
     method === 'POST' &&
     (pathname === '/api/system/restart-service' || pathname === '/api/system/restart-main')
   ) {
+    void onRestartService;
     sendJson(res, 410, {
       success: false,
       error: '页面恢复入口已改为“立即预检并恢复”。如需整服务重启，请使用 Telegram /reboot。',
@@ -175,6 +209,37 @@ async function handleApi(
     return true;
   }
 
+  const resetMatch = pathname.match(/^\/api\/accounts\/([^/]+)\/platforms\/([^/]+)\/reset$/);
+  if (method === 'POST' && resetMatch) {
+    const containerCode = decodeURIComponent(resetMatch[1]);
+    const platform = decodeURIComponent(resetMatch[2]).trim().toLowerCase();
+
+    if (!isKnownPlatform(platform)) {
+      throw new Error('平台参数不合法');
+    }
+
+    const accounts = readAccountsOrThrow();
+    const target = accounts.find(account => account.containerCode === containerCode);
+    if (!target) {
+      throw new Error('未找到对应账号');
+    }
+    if (!target.platforms.includes(platform)) {
+      throw new Error('该账号未启用此保活渠道');
+    }
+
+    updatePlatformState(state, containerCode, platform, {
+      status: 'ok',
+      lastAlert: undefined,
+      alertDetail: undefined,
+    });
+
+    sendJson(res, 200, {
+      success: true,
+      account: buildAdminAccountPayload([target], state)[0],
+    });
+    return true;
+  }
+
   const deleteMatch = pathname.match(/^\/api\/accounts\/([^/]+)$/);
   if (method === 'DELETE' && deleteMatch) {
     const containerCode = decodeURIComponent(deleteMatch[1]);
@@ -189,7 +254,7 @@ async function handleApi(
 }
 
 export async function startAdminServer(options: AdminServerOptions): Promise<Server> {
-  const { hub } = options;
+  const { hub, state } = options;
   const onRestartService = options.onRestartService ?? (() => process.exit(0));
   const onRecoverToday = options.onRecoverToday ?? (() => ({ success: false, message: '当前未启用手动恢复能力。' }));
   const getRuntimeStatus = options.getRuntimeStatus ?? (() => ({
@@ -197,6 +262,8 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Ser
     canRecover: false,
     recoveryInProgress: false,
     message: '服务启动中',
+    countdownSeconds: null,
+    expectedStartAt: null,
   }));
   const host = getAdminHost();
   const port = getAdminPort();
@@ -218,7 +285,7 @@ export async function startAdminServer(options: AdminServerOptions): Promise<Ser
         }
 
         if (url.pathname.startsWith('/api/')) {
-          const handled = await handleApi(req, res, hub, onRestartService, onRecoverToday, getRuntimeStatus);
+          const handled = await handleApi(req, res, hub, state, onRestartService, onRecoverToday, getRuntimeStatus);
           if (!handled) {
             sendJson(res, 404, { error: `未找到接口: ${method} ${url.pathname}` });
           }

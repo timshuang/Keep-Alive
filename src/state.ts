@@ -121,6 +121,20 @@ export function updatePlatformState(
   saveState(state);
 }
 
+export function getPlatformState(state: AppState, containerCode: string, platform: string): PlatformState {
+  const existing = state.accounts[containerCode]?.[platform];
+  if (!existing) {
+    return createDefaultPlatformState();
+  }
+
+  return {
+    lastRun: existing.lastRun ?? null,
+    status: existing.status ?? 'ok',
+    lastAlert: existing.lastAlert,
+    alertDetail: existing.alertDetail,
+  };
+}
+
 export function getTodayDate(): string {
   return formatLocalDate(new Date());
 }

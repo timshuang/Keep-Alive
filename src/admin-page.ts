@@ -13,8 +13,12 @@ export function renderAdminPage(): string {
         --line: rgba(148, 163, 184, 0.28);
         --brand: #d97706;
         --brand-strong: #b45309;
+        --danger: #b91c1c;
         --danger-soft: rgba(254, 226, 226, 0.92);
+        --success: #166534;
         --success-soft: rgba(220, 252, 231, 0.9);
+        --warning: #9a3412;
+        --warning-soft: rgba(255, 237, 213, 0.92);
         --info: #1d4ed8;
         --info-soft: rgba(219, 234, 254, 0.9);
         --shadow: 0 24px 60px rgba(120, 53, 15, 0.12);
@@ -101,10 +105,17 @@ export function renderAdminPage(): string {
 
       .secondary,
       .ghost,
-      .pager-btn {
+      .pager-btn,
+      .danger-btn {
         color: var(--text);
         background: rgba(255, 255, 255, 0.82);
         border: 1px solid var(--line);
+      }
+
+      .danger-btn {
+        color: var(--danger);
+        border-color: rgba(248, 113, 113, 0.4);
+        background: rgba(254, 242, 242, 0.95);
       }
 
       .status {
@@ -122,7 +133,7 @@ export function renderAdminPage(): string {
         border-color: rgba(96, 165, 250, 0.35);
       }
       .status.success {
-        color: #166534;
+        color: var(--success);
         background: var(--success-soft);
         border-color: rgba(34, 197, 94, 0.35);
       }
@@ -148,7 +159,7 @@ export function renderAdminPage(): string {
         border-color: rgba(96, 165, 250, 0.35);
       }
       .dialog-alert.success {
-        color: #166534;
+        color: var(--success);
         background: var(--success-soft);
         border-color: rgba(34, 197, 94, 0.35);
       }
@@ -208,9 +219,81 @@ export function renderAdminPage(): string {
 
       .platforms {
         display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: center;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 260px;
+      }
+
+      .platform-card {
+        border: 1px solid rgba(148, 163, 184, 0.26);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 12px 14px;
+        text-align: left;
+      }
+
+      .platform-card.paused {
+        text-align: center;
+        color: var(--muted);
+        background: rgba(248, 250, 252, 0.9);
+      }
+
+      .platform-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .platform-name {
+        font-size: 14px;
+        font-weight: 800;
+        color: #7c2d12;
+      }
+
+      .platform-meta {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .platform-reason {
+        color: var(--danger);
+      }
+
+      .platform-actions {
+        margin-top: 10px;
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .status-chip.ok {
+        color: var(--success);
+        background: rgba(220, 252, 231, 0.92);
+      }
+
+      .status-chip.verification_required {
+        color: var(--warning);
+        background: var(--warning-soft);
+      }
+
+      .status-chip.error {
+        color: var(--danger);
+        background: rgba(254, 226, 226, 0.92);
       }
 
       .chip {
@@ -237,7 +320,8 @@ export function renderAdminPage(): string {
         justify-content: center;
       }
 
-      .ghost {
+      .ghost,
+      .danger-btn {
         padding: 9px 14px;
         font-size: 13px;
         font-weight: 700;
@@ -406,7 +490,7 @@ export function renderAdminPage(): string {
 
         th:nth-child(3),
         td:nth-child(3) {
-          min-width: 220px;
+          min-width: 280px;
         }
       }
 
@@ -427,7 +511,8 @@ export function renderAdminPage(): string {
           grid-template-columns: 1fr;
         }
 
-        .row-actions {
+        .row-actions,
+        .platform-actions {
           flex-direction: column;
           align-items: stretch;
         }
@@ -448,12 +533,12 @@ export function renderAdminPage(): string {
       <section class="hero">
         <div>
           <p class="eyebrow">Keepalive Admin</p>
-          <h1>账号管理页</h1>
-          <p class="subtitle">管理本地账号配置和保活渠道，以及重补今日保活任务</p>
+          <h1>账号管理</h1>
+          <p class="subtitle">管理本地账号配置、查看各保活渠道当前状态，并在误判或人工处理后重置单个渠道的异常状态。</p>
         </div>
         <div class="actions">
           <button id="refreshBtn" class="secondary" type="button">刷新列表</button>
-          <button id="recoverTodayBtn" class="secondary" type="button">立刻重补今日任务</button>
+          <button id="recoverTodayBtn" class="secondary" type="button">立即重补今日任务</button>
           <button id="addBtn" class="primary" type="button">新增账号</button>
         </div>
       </section>
@@ -466,7 +551,7 @@ export function renderAdminPage(): string {
             <tr>
               <th>指纹环境名称</th>
               <th>指纹环境编号</th>
-              <th>保活渠道</th>
+              <th>保活渠道状态</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -552,12 +637,29 @@ export function renderAdminPage(): string {
       </div>
     </dialog>
 
+    <dialog id="resetDialog">
+      <div class="dialog-body">
+        <div class="dialog-header">
+          <div>
+            <h2 class="dialog-title">确认重置异常状态</h2>
+            <p class="dialog-copy" id="resetCopy">确认将该渠道状态重置为正常吗？该操作不会立即执行保活任务。</p>
+          </div>
+          <button type="button" class="close-btn" id="closeResetBtn">×</button>
+        </div>
+
+        <div class="dialog-footer">
+          <button type="button" class="secondary" id="cancelResetBtn">取消</button>
+          <button type="button" class="primary" id="confirmResetBtn">确认重置</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="recoverDialog">
       <div class="dialog-body">
         <div class="dialog-header">
           <div>
-            <h2 class="dialog-title">立刻重补今日任务</h2>
-            <p class="dialog-copy">今日任务尚未开始或预检失败时，手动立即预检并重补今日未完成保活任务。</p>
+            <h2 class="dialog-title">立即重补今日任务</h2>
+            <p class="dialog-copy">今日任务尚未开始或预检失败时，手动立刻预检并重补今日未完成保活任务。</p>
           </div>
           <button type="button" class="close-btn" id="closeRecoverBtn">×</button>
         </div>
@@ -577,14 +679,22 @@ export function renderAdminPage(): string {
         currentPage: 1,
         pageSize: 10,
         pendingDeleteCode: null,
+        pendingReset: null,
+        isResettingPlatform: false,
         isRecoveringToday: false,
         runtimeStatus: {
           phase: 'starting',
           canRecover: false,
           recoveryInProgress: false,
-          message: '服务启动中',
+          message: '服务启动中...',
         },
         runtimePollTimer: null,
+      };
+
+      const PLATFORM_LABELS = {
+        gmail: 'Gmail',
+        twitter: 'Twitter',
+        discord: 'Discord',
       };
 
       const POLL_INTERVAL_MS = 1500;
@@ -604,6 +714,11 @@ export function renderAdminPage(): string {
       const saveBtn = document.getElementById('saveBtn');
       const confirmDialog = document.getElementById('confirmDialog');
       const confirmCopy = document.getElementById('confirmCopy');
+      const resetDialog = document.getElementById('resetDialog');
+      const resetCopy = document.getElementById('resetCopy');
+      const closeResetBtn = document.getElementById('closeResetBtn');
+      const cancelResetBtn = document.getElementById('cancelResetBtn');
+      const confirmResetBtn = document.getElementById('confirmResetBtn');
       const recoverDialog = document.getElementById('recoverDialog');
       const closeRecoverBtn = document.getElementById('closeRecoverBtn');
       const cancelRecoverBtn = document.getElementById('cancelRecoverBtn');
@@ -618,8 +733,11 @@ export function renderAdminPage(): string {
       document.getElementById('closeConfirmBtn').addEventListener('click', closeConfirmDialog);
       document.getElementById('cancelConfirmBtn').addEventListener('click', closeConfirmDialog);
       document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDeleteAccount);
-      closeRecoverBtn.addEventListener('click', closeRecoverDialog);
-      cancelRecoverBtn.addEventListener('click', closeRecoverDialog);
+      closeResetBtn.addEventListener('click', () => closeResetDialog(false));
+      cancelResetBtn.addEventListener('click', () => closeResetDialog(false));
+      confirmResetBtn.addEventListener('click', confirmResetPlatform);
+      closeRecoverBtn.addEventListener('click', () => closeRecoverDialog(false));
+      cancelRecoverBtn.addEventListener('click', () => closeRecoverDialog(false));
       confirmRecoverBtn.addEventListener('click', recoverToday);
       form.addEventListener('submit', onSubmit);
 
@@ -679,7 +797,7 @@ export function renderAdminPage(): string {
         if (runtime.phase === 'completed') {
           return '今日任务已完成';
         }
-        return '立刻重补今日任务';
+        return '立即重补今日任务';
       }
 
       function getStatusStyle(runtime) {
@@ -695,8 +813,42 @@ export function renderAdminPage(): string {
         return 'info';
       }
 
+      function formatTimeOnly(value) {
+        if (!value) {
+          return '';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return '';
+        }
+
+        return date.toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        });
+      }
+
+      function getRuntimeStatusMessage(runtime) {
+        if (
+          runtime &&
+          runtime.phase === 'idle_waiting' &&
+          typeof runtime.countdownSeconds === 'number' &&
+          runtime.expectedStartAt
+        ) {
+          const expectedTime = formatTimeOnly(runtime.expectedStartAt);
+          if (expectedTime) {
+            return '距离开始还有 ' + runtime.countdownSeconds + ' 秒，预计 ' + expectedTime + ' 开始';
+          }
+        }
+
+        return runtime && runtime.message ? runtime.message : '';
+      }
+
       function shouldShowRuntimeStatus(runtime) {
-        return Boolean(runtime.message) && !state.isRecoveringToday;
+        return Boolean(getRuntimeStatusMessage(runtime)) && !state.isRecoveringToday;
       }
 
       function isStableRuntimePhase(runtime) {
@@ -714,8 +866,9 @@ export function renderAdminPage(): string {
       function syncRecoverControls() {
         const runtime = state.runtimeStatus || {};
         const canRecover = Boolean(runtime.canRecover) && !state.isRecoveringToday;
+        const runtimeMessage = getRuntimeStatusMessage(runtime);
         recoverTodayBtn.disabled = !canRecover;
-        recoverTodayBtn.title = runtime.message || '';
+        recoverTodayBtn.title = runtimeMessage;
         recoverTodayBtn.textContent = getRecoverButtonLabel(runtime);
         closeRecoverBtn.disabled = state.isRecoveringToday;
         cancelRecoverBtn.disabled = state.isRecoveringToday;
@@ -723,8 +876,15 @@ export function renderAdminPage(): string {
         confirmRecoverBtn.textContent = state.isRecoveringToday ? '正在提交...' : '确认重补';
 
         if (shouldShowRuntimeStatus(runtime)) {
-          setStatus(getStatusStyle(runtime), runtime.message);
+          setStatus(getStatusStyle(runtime), runtimeMessage);
         }
+      }
+
+      function syncResetControls() {
+        closeResetBtn.disabled = state.isResettingPlatform;
+        cancelResetBtn.disabled = state.isResettingPlatform;
+        confirmResetBtn.disabled = state.isResettingPlatform || !state.pendingReset;
+        confirmResetBtn.textContent = state.isResettingPlatform ? '正在重置...' : '确认重置';
       }
 
       async function loadRuntimeStatus() {
@@ -793,6 +953,65 @@ export function renderAdminPage(): string {
         });
       }
 
+      function getPlatformLabel(platform) {
+        return PLATFORM_LABELS[platform] || platform;
+      }
+
+      function getStatusLabel(status) {
+        if (status === 'verification_required') return '需验证';
+        if (status === 'error') return '异常';
+        return '正常';
+      }
+
+      function formatDateTime(value) {
+        if (!value) {
+          return '未执行';
+        }
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+
+        return date.toLocaleString('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      }
+
+      function renderPlatformCards(account) {
+        if (!account.platforms || account.platforms.length === 0) {
+          return '<div class="platform-card paused"><span class="chip muted">已暂停</span></div>';
+        }
+
+        return account.platforms.map(platform => {
+          const platformState = (account.platformStates && account.platformStates[platform]) || {
+            status: 'ok',
+            lastRun: null,
+          };
+          const isAbnormal = platformState.status !== 'ok';
+          const reason = platformState.alertDetail ? '<div class="platform-reason">异常原因: ' + escapeHtml(platformState.alertDetail) + '</div>' : '';
+          const resetButton = isAbnormal
+            ? '<div class="platform-actions"><button class="danger-btn" type="button" data-action="reset" data-code="' + escapeHtml(account.containerCode) + '" data-platform="' + escapeHtml(platform) + '">重置异常</button></div>'
+            : '';
+
+          return '<div class="platform-card">' +
+            '<div class="platform-head">' +
+              '<span class="platform-name">' + escapeHtml(getPlatformLabel(platform)) + '</span>' +
+              '<span class="status-chip ' + escapeHtml(platformState.status) + '">' + escapeHtml(getStatusLabel(platformState.status)) + '</span>' +
+            '</div>' +
+            '<div class="platform-meta">' +
+              '<div>最近执行: ' + escapeHtml(formatDateTime(platformState.lastRun)) + '</div>' +
+              reason +
+            '</div>' +
+            resetButton +
+          '</div>';
+        }).join('');
+      }
+
       function renderAccounts() {
         if (!state.accounts.length) {
           tableBody.innerHTML = '<tr><td class="empty" colspan="4">还没有账号，先新增一个吧。</td></tr>';
@@ -805,14 +1024,10 @@ export function renderAdminPage(): string {
         const currentAccounts = state.accounts.slice(startIndex, startIndex + state.pageSize);
 
         tableBody.innerHTML = currentAccounts.map(account => {
-          const platforms = account.platforms.length > 0
-            ? account.platforms.map(platform => '<span class="chip">' + escapeHtml(platform) + '</span>').join('')
-            : '<span class="chip muted">已暂停</span>';
-
           return '<tr>' +
             '<td class="center-cell">' + escapeHtml(account.containerName) + '</td>' +
             '<td class="center-cell"><span class="code">' + escapeHtml(account.containerCode) + '</span></td>' +
-            '<td class="center-cell"><div class="platforms">' + platforms + '</div></td>' +
+            '<td class="center-cell"><div class="platforms">' + renderPlatformCards(account) + '</div></td>' +
             '<td class="actions-cell"><div class="row-actions">' +
               '<button class="ghost" type="button" data-action="edit" data-code="' + escapeHtml(account.containerCode) + '">修改渠道</button>' +
               '<button class="ghost" type="button" data-action="delete" data-code="' + escapeHtml(account.containerCode) + '">删除</button>' +
@@ -829,6 +1044,12 @@ export function renderAdminPage(): string {
         tableBody.querySelectorAll('button[data-action="delete"]').forEach(button => {
           button.addEventListener('click', () => {
             openDeleteDialog(button.getAttribute('data-code'));
+          });
+        });
+
+        tableBody.querySelectorAll('button[data-action="reset"]').forEach(button => {
+          button.addEventListener('click', () => {
+            openResetDialog(button.getAttribute('data-code'), button.getAttribute('data-platform'));
           });
         });
 
@@ -890,6 +1111,26 @@ export function renderAdminPage(): string {
         confirmDialog.showModal();
       }
 
+      function openResetDialog(code, platform) {
+        const account = state.accounts.find(item => item.containerCode === code);
+        if (!account || !platform) return;
+
+        const platformState = account.platformStates && account.platformStates[platform];
+        if (!platformState || platformState.status === 'ok') {
+          return;
+        }
+
+        state.pendingReset = {
+          code,
+          platform,
+          containerName: account.containerName,
+        };
+        state.isResettingPlatform = false;
+        resetCopy.textContent = '确认将 ' + account.containerName + '（' + account.containerCode + '）的 ' + getPlatformLabel(platform) + ' 状态重置为正常吗？该操作不会立即执行保活任务。';
+        syncResetControls();
+        resetDialog.showModal();
+      }
+
       function closeDialog() {
         dialog.close();
       }
@@ -897,6 +1138,16 @@ export function renderAdminPage(): string {
       function closeConfirmDialog() {
         state.pendingDeleteCode = null;
         confirmDialog.close();
+      }
+
+      function closeResetDialog(force) {
+        if (state.isResettingPlatform && !force) {
+          return;
+        }
+        state.pendingReset = null;
+        state.isResettingPlatform = false;
+        syncResetControls();
+        resetDialog.close();
       }
 
       function openRecoverDialog() {
@@ -917,6 +1168,30 @@ export function renderAdminPage(): string {
         recoverDialog.close();
       }
 
+      async function confirmResetPlatform() {
+        if (!state.pendingReset) {
+          return;
+        }
+
+        const currentReset = state.pendingReset;
+        state.isResettingPlatform = true;
+        syncResetControls();
+
+        try {
+          setStatus('info', '正在重置 ' + currentReset.code + '/' + currentReset.platform + ' 异常状态...');
+          await api('/api/accounts/' + encodeURIComponent(currentReset.code) + '/platforms/' + encodeURIComponent(currentReset.platform) + '/reset', {
+            method: 'POST',
+          });
+          await loadAccounts(false);
+          setStatus('success', '已重置 ' + currentReset.code + '/' + currentReset.platform + ' 异常状态');
+          closeResetDialog(true);
+        } catch (error) {
+          state.isResettingPlatform = false;
+          syncResetControls();
+          setStatus('error', error.message || '重置异常状态失败');
+        }
+      }
+
       async function recoverToday() {
         state.isRecoveringToday = true;
         syncRecoverControls();
@@ -924,13 +1199,13 @@ export function renderAdminPage(): string {
         try {
           setStatus('info', '正在立即预检，预检通过后会重补今日未完成保活任务...');
           const payload = await api('/api/system/recover-today', { method: 'POST' });
-          setStatus('success', payload.message || '已开始立刻重补今日任务。');
+          setStatus('success', payload.message || '已开始立即重补今日任务。');
           closeRecoverDialog(true);
           await loadRuntimeStatus();
           pollRuntimeStatusUntilStable();
         } catch (error) {
           state.isRecoveringToday = false;
-          setStatus('error', error.message || '立刻重补今日任务失败');
+          setStatus('error', error.message || '立即重补今日任务失败');
           await loadRuntimeStatus().catch(() => {});
           syncRecoverControls();
         }
