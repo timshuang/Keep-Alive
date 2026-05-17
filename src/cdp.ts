@@ -60,6 +60,26 @@ export async function connectCDP(debuggingPort: number, config: Config): Promise
     }
     createdPages.length = 0;
 
+    // Minimize window before disconnecting so it goes to taskbar
+    try {
+      const cdpSession = await browser.newBrowserCDPSession();
+      const { targetInfos } = await cdpSession.send('Target.getTargets');
+      const pageTarget = targetInfos.find((t: any) => t.type === 'page');
+      if (pageTarget) {
+        const { windowId } = await cdpSession.send('Browser.getWindowForTarget', {
+          targetId: pageTarget.targetId,
+        });
+        await cdpSession.send('Browser.setWindowBounds', {
+          windowId,
+          bounds: { windowState: 'minimized' },
+        });
+        logger.info('CDP: Window minimized');
+      }
+      await cdpSession.detach();
+    } catch (err) {
+      logger.warn(`CDP: Failed to minimize window: ${err}`);
+    }
+
     try {
       await browser.close();
       logger.info('CDP: Disconnected from browser');

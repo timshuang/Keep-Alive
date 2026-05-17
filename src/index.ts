@@ -530,6 +530,9 @@ async function runDailyCycle(
           await notifier.sendAlert(item.containerCode, item.containerName, outcome.platform, outcome.reason || 'Unknown', outcome.url);
         }
 
+        const pauseMs = 2000 + Math.random() * 1000;
+        logger.info(`Closing tab in ${Math.round(pauseMs / 1000)}s...`);
+        await sleep(pauseMs);
         await close();
       } finally {
         await session.close();
