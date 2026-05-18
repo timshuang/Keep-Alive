@@ -578,8 +578,10 @@ export function renderAdminPage(): string {
           <p class="eyebrow">Keepalive Admin</p>
           <h1>账号管理</h1>
           <p class="subtitle">
-            1.管理本地账号配置、人工介入重补当日任务�?            <br />
-            2.查看各保活渠道当前状态，重置单个渠道的异常状态�?          </p>
+            1.管理本地账号配置、人工介入重补当日任务。
+            <br />
+            2.查看各保活渠道当前状态，重置单个渠道的异常状态。
+          </p>
         </div>
         <div class="actions">
           <button id="refreshBtn" class="secondary" type="button">刷新列表</button>
@@ -596,7 +598,7 @@ export function renderAdminPage(): string {
             <tr>
               <th>指纹环境名称</th>
               <th>指纹环境编号</th>
-              <th>保活渠道状�?/th>
+              <th>保活渠道状态</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -616,7 +618,7 @@ export function renderAdminPage(): string {
         <div class="dialog-header">
           <div>
             <h2 class="dialog-title" id="dialogTitle">新增账号</h2>
-            <p class="dialog-copy" id="dialogCopy">填写指纹环境信息并勾选需要保活的渠道；如果一个都不选，则表示暂停保活并保留在配置中�?/p>
+            <p class="dialog-copy" id="dialogCopy">填写指纹环境信息并勾选需要保活的渠道；如果一个都不选，则表示暂停保活并保留在配置中。</p>
           </div>
           <button type="button" class="close-btn" id="closeDialogBtn">×</button>
         </div>
@@ -640,7 +642,7 @@ export function renderAdminPage(): string {
             <div class="check-card">
               <label>
                 <input type="checkbox" name="platforms" value="twitter" />
-                <div>Twitter<span>时间线浏�?/span></div>
+                <div>Twitter<span>时间线浏览</span></div>
               </label>
             </div>
             <div class="check-card">
@@ -670,7 +672,7 @@ export function renderAdminPage(): string {
         <div class="dialog-header">
           <div>
             <h2 class="dialog-title">确认删除</h2>
-            <p class="dialog-copy" id="confirmCopy">删除后会立刻�?accounts.json 中移除�?/p>
+            <p class="dialog-copy" id="confirmCopy">删除后会立刻从 accounts.json 中移除。</p>
           </div>
           <button type="button" class="close-btn" id="closeConfirmBtn">×</button>
         </div>
@@ -686,8 +688,8 @@ export function renderAdminPage(): string {
       <div class="dialog-body">
         <div class="dialog-header">
           <div>
-            <h2 class="dialog-title">确认重置异常状�?/h2>
-            <p class="dialog-copy" id="resetCopy">确认将该渠道状态重置为正常吗？该操作不会立即执行保活任务�?/p>
+            <h2 class="dialog-title">确认重置异常状态</h2>
+            <p class="dialog-copy" id="resetCopy">确认将该渠道状态重置为正常吗？该操作不会立即执行保活任务。</p>
           </div>
           <button type="button" class="close-btn" id="closeResetBtn">×</button>
         </div>
@@ -704,7 +706,7 @@ export function renderAdminPage(): string {
         <div class="dialog-header">
           <div>
             <h2 class="dialog-title">立即重补今日任务</h2>
-            <p class="dialog-copy">今日任务尚未开始或预检失败时，手动立刻预检并重补今日未完成保活任务�?/p>
+            <p class="dialog-copy">今日任务尚未开始或预检失败时，手动立刻预检并重补今日未完成保活任务。</p>
           </div>
           <button type="button" class="close-btn" id="closeRecoverBtn">×</button>
         </div>
@@ -733,7 +735,7 @@ export function renderAdminPage(): string {
           recoveryInProgress: false,
           countdownSeconds: null,
           expectedStartAt: null,
-          message: '服务启动�?..',
+          message: '服务启动中...',
         },
         runtimePollTimer: null,
       };
@@ -839,10 +841,10 @@ export function renderAdminPage(): string {
           return '正在重补今日任务...';
         }
         if (runtime.phase === 'running') {
-          return '今日保活执行�?;
+          return '今日保活执行中';
         }
         if (runtime.phase === 'completed') {
-          return '今日任务已完�?;
+          return '今日任务已完成';
         }
         return '立即重补今日任务';
       }
@@ -880,7 +882,7 @@ export function renderAdminPage(): string {
 
       function formatCountdownDuration(totalSeconds) {
         if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
-          return '0 �?;
+          return '0 秒';
         }
 
         const seconds = Math.floor(totalSeconds);
@@ -889,20 +891,20 @@ export function renderAdminPage(): string {
         const remainingSeconds = seconds % 60;
 
         if (hours > 0) {
-          return hours + ' 小时 ' + minutes + ' 分钟 ' + remainingSeconds + ' �?;
+          return hours + ' 小时 ' + minutes + ' 分钟 ' + remainingSeconds + ' 秒';
         }
 
         if (minutes > 0) {
-          return minutes + ' 分钟 ' + remainingSeconds + ' �?;
+          return minutes + ' 分钟 ' + remainingSeconds + ' 秒';
         }
 
-        return remainingSeconds + ' �?;
+        return remainingSeconds + ' 秒';
       }
 
       function buildPlatformTooltip(platformState) {
         const parts = [];
-        parts.push('状�? ' + getStatusLabel(platformState.status));
-        parts.push('最近执�? ' + formatDateTime(platformState.lastRun));
+        parts.push('状态: ' + getStatusLabel(platformState.status));
+        parts.push('最近执行: ' + formatDateTime(platformState.lastRun));
         if (platformState.alertDetail) {
           parts.push('异常原因: ' + platformState.alertDetail);
         }
@@ -918,7 +920,7 @@ export function renderAdminPage(): string {
         ) {
           const expectedTime = formatTimeOnly(runtime.expectedStartAt);
           if (expectedTime) {
-            return '距离开始还�?' + formatCountdownDuration(runtime.countdownSeconds) + '，预�?' + expectedTime + ' 开�?;
+            return '距离开始还有 ' + formatCountdownDuration(runtime.countdownSeconds) + '，预计 ' + expectedTime + ' 开始';
           }
         }
 
@@ -986,7 +988,7 @@ export function renderAdminPage(): string {
               return;
             }
           } catch (error) {
-            setStatus('error', error.message || '获取运行状态失�?);
+            setStatus('error', error.message || '获取运行状态失败');
             state.isRecoveringToday = false;
             syncRecoverControls();
             stopRuntimePolling();
@@ -1011,14 +1013,14 @@ export function renderAdminPage(): string {
         const start = (state.currentPage - 1) * state.pageSize + 1;
         const end = Math.min(state.currentPage * state.pageSize, state.accounts.length);
         pager.hidden = false;
-        pagerMeta.textContent = '�?' + state.accounts.length + ' 条，当前�?' + state.currentPage + ' / ' + totalPages + ' 页，显示 ' + start + '-' + end + ' �?;
+        pagerMeta.textContent = '共 ' + state.accounts.length + ' 条，当前第 ' + state.currentPage + ' / ' + totalPages + ' 页，显示 ' + start + '-' + end + ' 条';
 
         const buttons = [];
-        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage - 1) + '" ' + (state.currentPage === 1 ? 'disabled' : '') + '>上一�?/button>');
+        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage - 1) + '" ' + (state.currentPage === 1 ? 'disabled' : '') + '>上一页</button>');
         for (let page = 1; page <= totalPages; page++) {
           buttons.push('<button class="pager-btn' + (page === state.currentPage ? ' active' : '') + '" type="button" data-page="' + page + '">' + page + '</button>');
         }
-        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage + 1) + '" ' + (state.currentPage === totalPages ? 'disabled' : '') + '>下一�?/button>');
+        buttons.push('<button class="pager-btn" type="button" data-page="' + (state.currentPage + 1) + '" ' + (state.currentPage === totalPages ? 'disabled' : '') + '>下一页</button>');
 
         pagerActions.innerHTML = buttons.join('');
         pagerActions.querySelectorAll('button[data-page]').forEach(button => {
@@ -1044,7 +1046,7 @@ export function renderAdminPage(): string {
 
       function formatDateTime(value) {
         if (!value) {
-          return '未执�?;
+          return '未执行';
         }
 
         const date = new Date(value);
@@ -1063,7 +1065,7 @@ export function renderAdminPage(): string {
 
       function renderPlatformCards(account) {
         if (!account.platforms || account.platforms.length === 0) {
-          return '<div class="platform-card paused"><span class="chip muted">已暂�?/span></div>';
+          return '<div class="platform-card paused"><span class="chip muted">已暂停</span></div>';
         }
 
         return account.platforms.map(platform => {
@@ -1097,7 +1099,7 @@ export function renderAdminPage(): string {
 
       function renderAccounts() {
         if (!state.accounts.length) {
-          tableBody.innerHTML = '<tr><td class="empty" colspan="4">还没有账号，先新增一个吧�?/td></tr>';
+          tableBody.innerHTML = '<tr><td class="empty" colspan="4">还没有账号，先新增一个吧。</td></tr>';
           renderPager();
           return;
         }
@@ -1166,7 +1168,7 @@ export function renderAdminPage(): string {
         state.editingCode = null;
         resetForm();
         dialogTitle.textContent = '新增账号';
-        dialogCopy.textContent = '填写指纹环境信息并勾选需要保活的渠道；如果一个都不选，则表示暂停保活并保留在配置中�?;
+        dialogCopy.textContent = '填写指纹环境信息并勾选需要保活的渠道；如果一个都不选，则表示暂停保活并保留在配置中。';
         containerNameInput.readOnly = false;
         containerCodeInput.readOnly = false;
         saveBtn.textContent = '保存账号';
@@ -1181,7 +1183,7 @@ export function renderAdminPage(): string {
         state.editingCode = code;
         resetForm();
         dialogTitle.textContent = '修改渠道';
-        dialogCopy.textContent = '编辑模式下只允许修改保活渠道；如果全部取消勾选，则该账号会暂停保活，并在下一自然日生效�?;
+        dialogCopy.textContent = '编辑模式下只允许修改保活渠道；如果全部取消勾选，则该账号会暂停保活，并在下一自然日生效。';
         containerNameInput.value = account.containerName;
         containerCodeInput.value = account.containerCode;
         containerNameInput.readOnly = true;
@@ -1196,7 +1198,7 @@ export function renderAdminPage(): string {
         if (!account) return;
 
         state.pendingDeleteCode = code;
-        confirmCopy.textContent = '确认删除指纹环境 ' + account.containerName + '�? + account.containerCode + '）吗？删除后会立刻从 accounts.json 中移除�?;
+        confirmCopy.textContent = '确认删除指纹环境 ' + account.containerName + '（' + account.containerCode + '）吗？删除后会立刻从 accounts.json 中移除。';
         confirmDialog.showModal();
       }
 
@@ -1215,7 +1217,7 @@ export function renderAdminPage(): string {
           containerName: account.containerName,
         };
         state.isResettingPlatform = false;
-        resetCopy.textContent = '确认�?' + account.containerName + '�? + account.containerCode + '）的 ' + getPlatformLabel(platform) + ' 状态重置为正常吗？该操作不会立即执行保活任务�?;
+        resetCopy.textContent = '确认将 ' + account.containerName + '（' + account.containerCode + '）的 ' + getPlatformLabel(platform) + ' 状态重置为正常吗？该操作不会立即执行保活任务。';
         syncResetControls();
         resetDialog.showModal();
       }
@@ -1267,17 +1269,17 @@ export function renderAdminPage(): string {
         syncResetControls();
 
         try {
-          setStatus('info', '正在重置 ' + currentReset.code + '/' + currentReset.platform + ' 异常状�?..');
+          setStatus('info', '正在重置 ' + currentReset.code + '/' + currentReset.platform + ' 异常状态...');
           await api('/api/accounts/' + encodeURIComponent(currentReset.code) + '/platforms/' + encodeURIComponent(currentReset.platform) + '/reset', {
             method: 'POST',
           });
           await loadAccounts(false);
-          setStatus('success', '已重�?' + currentReset.code + '/' + currentReset.platform + ' 异常状�?);
+          setStatus('success', '已重置 ' + currentReset.code + '/' + currentReset.platform + ' 异常状态');
           closeResetDialog(true);
         } catch (error) {
           state.isResettingPlatform = false;
           syncResetControls();
-          setStatus('error', error.message || '重置异常状态失�?);
+          setStatus('error', error.message || '重置异常状态失败');
         }
       }
 
@@ -1286,9 +1288,9 @@ export function renderAdminPage(): string {
         syncRecoverControls();
 
         try {
-          setStatus('info', '正在立即预检，预检通过后会重补今日未完成保活任�?..');
+          setStatus('info', '正在立即预检，预检通过后会重补今日未完成保活任务...');
           const payload = await api('/api/system/recover-today', { method: 'POST' });
-          setStatus('success', payload.message || '已开始立即重补今日任务�?);
+          setStatus('success', payload.message || '已开始立即重补今日任务。');
           closeRecoverDialog(true);
           await loadRuntimeStatus();
           pollRuntimeStatusUntilStable();
@@ -1313,13 +1315,13 @@ export function renderAdminPage(): string {
           state.currentPage = 1;
           renderAccounts();
           if (showMessage) {
-            setStatus('success', '账号列表已刷新�?);
+            setStatus('success', '账号列表已刷新。');
           } else if (!state.runtimeStatus.message) {
             clearStatus();
           }
         } catch (error) {
           setStatus('error', error.message || '加载账号列表失败');
-          tableBody.innerHTML = '<tr><td class="empty" colspan="4">加载失败，请稍后重试�?/td></tr>';
+          tableBody.innerHTML = '<tr><td class="empty" colspan="4">加载失败，请稍后重试。</td></tr>';
           renderPager();
         }
       }
@@ -1343,7 +1345,7 @@ export function renderAdminPage(): string {
             state.accounts = refreshed.accounts || [];
             state.currentPage = getTotalPages();
             renderAccounts();
-            setDialogAlert('success', '新增账号成功�?);
+            setDialogAlert('success', '新增账号成功。');
             setTimeout(() => {
               if (dialog.open && state.mode === 'create') {
                 closeDialog();
@@ -1357,7 +1359,7 @@ export function renderAdminPage(): string {
             });
             const refreshed = await api('/api/accounts');
             state.accounts = refreshed.accounts || [];
-            setStatus('success', '渠道更新成功，新的保活配置会在下一自然日生效�?);
+            setStatus('success', '渠道更新成功，新的保活配置会在下一自然日生效。');
             closeDialog();
             renderAccounts();
           }
@@ -1380,7 +1382,7 @@ export function renderAdminPage(): string {
           const refreshed = await api('/api/accounts');
           state.accounts = refreshed.accounts || [];
           ensureValidPage();
-          setStatus('success', '账号已删除�?);
+          setStatus('success', '账号已删除。');
           closeConfirmDialog();
           renderAccounts();
         } catch (error) {

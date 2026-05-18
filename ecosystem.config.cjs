@@ -6,7 +6,7 @@ const logsDir = path.join(root, 'logs', 'pm2');
 module.exports = {
   apps: [
     {
-      name: 'keepalive',
+      name: 'keep-alive',
       cwd: root,
       script: path.join(root, 'dist', 'index.js'),
       interpreter: 'node',
