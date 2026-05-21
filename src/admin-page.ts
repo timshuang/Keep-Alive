@@ -872,12 +872,13 @@ export function renderAdminPage(): string {
           return '';
         }
 
-        return date.toLocaleTimeString('zh-CN', {
+        return new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
           hour12: false,
-        });
+        }).format(date);
       }
 
       function formatCountdownDuration(totalSeconds) {
@@ -1054,13 +1055,14 @@ export function renderAdminPage(): string {
           return value;
         }
 
-        return date.toLocaleString('zh-CN', {
+        return new Intl.DateTimeFormat('zh-CN', {
+          timeZone: 'Asia/Shanghai',
           year: 'numeric',
           month: '2-digit',
           day: '2-digit',
           hour: '2-digit',
           minute: '2-digit',
-        });
+        }).format(date);
       }
 
       function renderPlatformCards(account) {

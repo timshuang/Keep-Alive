@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { toLocalDisplay, getTodayString } from './timezone';
 import path from 'path';
 
 export enum LogLevel {
@@ -43,12 +44,12 @@ export class Logger {
   }
 
   private getLogFile(): string {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = getTodayString();
     return path.join(this.logDir, `keepalive-${date}.log`);
   }
 
   private formatMessage(level: LogLevel, msg: string): string {
-    const ts = new Date().toISOString().slice(0, 19);
+    const ts = toLocalDisplay();
     return `[${ts}] ${LogLevel[level]} ${msg}`;
   }
 

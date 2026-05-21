@@ -1,4 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
+import { toLocalISO, getTodayString } from './timezone';
 import { Resend } from 'resend';
 import { Config } from './config';
 import { logger } from './logger';
@@ -83,7 +84,8 @@ export class Notifier {
       `环境: ${containerName} (${containerCode})`,
       `平台: ${platform}`,
       `问题: ${reason}`,
-      `时间: ${new Date().toISOString().slice(0, 19)}`,
+      `URL: ${url || 'unknown'}`,
+      `时间: ${toLocalISO().slice(0, 19)}`,
       '',
       '该账号已标记为 verification_required，后续保活将跳过。',
       '发送 /reset &lt;containerCode&gt; &lt;platform&gt; 重置状态。',
@@ -93,7 +95,7 @@ export class Notifier {
   }
 
   async sendPrecheck(results: Array<{ code: string; name: string; ok: boolean; detail: string }>): Promise<void> {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = getTodayString();
     const header = '🔍 <b>Keepalive 环境预检</b> - ' + date;
 
     const codeW = 10;
@@ -116,7 +118,7 @@ export class Notifier {
   }
 
   async sendDailyReport(outcomes: Array<ActionOutcome & { code: string; name: string }>, accounts: AccountInfo[]): Promise<void> {
-    const date = new Date().toISOString().slice(0, 10);
+    const date = getTodayString();
     const header = '📊 <b>Keepalive 日报</b> - ' + date;
 
     const codeW = 10;
@@ -181,7 +183,7 @@ export class Notifier {
           from: 'Keepalive <onboarding@resend.dev>',
           to: this.config.email.alertEmail,
           subject: '💀 Keepalive 程序异常退出',
-          text: `Keepalive program died at ${new Date().toISOString()}. Watchdog is restarting...`,
+          text: `Keepalive program died at ${toLocalISO()}. Watchdog is restarting...`,
         });
       } catch (err) {
         logger.error(`Email: Failed to send death notice: ${err}`);

@@ -1,6 +1,7 @@
-import fs from 'fs';
+﻿import fs from 'fs';
 import path from 'path';
 import { logger } from './logger';
+import { getTodayString } from './timezone';
 
 export type PlatformStatus = 'ok' | 'verification_required' | 'error';
 
@@ -35,13 +36,6 @@ const STATE_FILE = path.resolve(process.cwd(), 'state.json');
 
 function createDefaultPlatformState(): PlatformState {
   return { lastRun: null, status: 'ok' };
-}
-
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 export function loadState(): AppState {
@@ -135,14 +129,15 @@ export function getPlatformState(state: AppState, containerCode: string, platfor
   };
 }
 
+/** Returns today's date string in UTC+8: "YYYY-MM-DD" */
 export function getTodayDate(): string {
-  return formatLocalDate(new Date());
+  return getTodayString();
 }
 
 export function cleanOldDailyQueues(state: AppState, keepDays: number = 7): void {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - keepDays);
-  const cutoffStr = formatLocalDate(cutoff);
+  const cutoffStr = getTodayString(cutoff);
 
   for (const date of Object.keys(state.dailyQueue)) {
     if (date < cutoffStr) {

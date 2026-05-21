@@ -1,3 +1,4 @@
+import { toLocalISO } from './timezone';
 import { Config } from './config';
 import { logger } from './logger';
 import { AppState, DailyQueue, getTodayDate, isRunToday, PlatformState } from './state';
@@ -164,7 +165,7 @@ export function applyFirstRunStagger(
       if (!state.accounts[account.containerCode][platform] || state.accounts[account.containerCode][platform].lastRun === null) {
         const staggerDays = i % config.intervals[platformKey];
         const staggerMs = staggerDays * 86400 * 1000;
-        const lastRun = new Date(now - staggerMs).toISOString();
+        const lastRun = toLocalISO(new Date(now - staggerMs));
 
         state.accounts[account.containerCode][platform] = {
           lastRun,

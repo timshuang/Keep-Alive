@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { toLocalISO, toLocalDisplay } from './timezone';
 import path from 'path';
 import { startAdminServer, RuntimeStatusPayload } from './admin-server';
 import { loadConfig } from './config';
@@ -95,7 +96,7 @@ function createRuntimeControl(): RuntimeControl {
         ? Math.max(0, Math.ceil((expectedStartAtMs - Date.now()) / 1000))
         : null,
       expectedStartAt: phase === 'idle_waiting' && expectedStartAtMs !== null
-        ? new Date(expectedStartAtMs).toISOString()
+        ? toLocalISO(new Date(expectedStartAtMs))
         : null,
     }),
     registerWaitCanceler: canceler => {
@@ -227,7 +228,7 @@ async function waitUntilNextDailyWindow(runtimeControl: RuntimeControl): Promise
   const next = getNextDailyWakeTime(now);
   const waitMs = next.getTime() - now.getTime();
   const waitMinutes = Math.max(1, Math.ceil(waitMs / 60000));
-  logger.info(`Sleeping until ${next.toLocaleString()} (${waitMinutes} min).`);
+  logger.info(`Sleeping until ${toLocalDisplay(next)} (${waitMinutes} min).`);
   return sleepInterruptibly(waitMs, runtimeControl);
 }
 
@@ -263,7 +264,7 @@ async function applyDailyStartDelay(
 
   const expectedStartAt = new Date(Date.now() + delaySeconds * 1000);
   runtimeControl.setWaitingCountdown(
-    `今日任务等待随机延迟结束，距离开始还有 ${delaySeconds} 秒，预计 ${expectedStartAt.toLocaleTimeString('zh-CN', { hour12: false })} 开始。`,
+    `今日任务等待随机延迟结束，距离开始还有 ${delaySeconds} 秒，预计 ${toLocalISO(expectedStartAt).slice(11, 19)} 开始。`,
     expectedStartAt
   );
 
@@ -516,14 +517,14 @@ async function runDailyCycle(
 
         if (outcome.success) {
           updatePlatformState(state, item.containerCode, item.platform, {
-            lastRun: new Date().toISOString(),
+            lastRun: toLocalISO(),
             status: 'ok',
           });
           logger.success(`${item.containerName}/${item.platform}: OK`);
         } else {
           updatePlatformState(state, item.containerCode, item.platform, {
             status: 'verification_required',
-            lastAlert: new Date().toISOString(),
+            lastAlert: toLocalISO(),
             alertDetail: outcome.reason,
           });
           logger.fail(`${item.containerName}/${item.platform}: ${outcome.reason}`);
