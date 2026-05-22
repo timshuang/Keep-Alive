@@ -118,7 +118,7 @@ export async function keepaliveGmail(page: Page, config: Config): Promise<Action
   const platform: PlatformName = 'gmail';
 
   try {
-    await page.goto('https://mail.google.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto('https://mail.google.com/mail/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await waitRandom(config);
 
     const result: DetectionResult = await detect(page, platform);
@@ -147,7 +147,7 @@ export async function keepaliveTwitter(page: Page, config: Config): Promise<Acti
   const platform: PlatformName = 'twitter';
 
   try {
-    await page.goto('https://x.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await waitRandom(config);
 
     const result: DetectionResult = await detect(page, platform);
