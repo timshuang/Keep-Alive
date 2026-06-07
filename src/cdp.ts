@@ -13,6 +13,12 @@ export async function connectCDP(debuggingPort: number, config: Config): Promise
   const cdpHost = config.hub.host;
   const cdpUrl = `http://${cdpHost}:${debuggingPort}`;
 
+  // Ensure local CDP requests bypass system proxy (HTTP_PROXY)
+  const prevNoProxy = process.env.NO_PROXY || process.env.no_proxy || '';
+  if (!prevNoProxy.includes(cdpHost)) {
+    process.env.NO_PROXY = prevNoProxy ? `${prevNoProxy},${cdpHost}` : cdpHost;
+  }
+
   logger.info(`CDP: Connecting to ${cdpUrl}`);
 
   const browser = await chromium.connectOverCDP(cdpUrl);
